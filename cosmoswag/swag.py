@@ -151,6 +151,18 @@ class SWAGModel(nn.Module):
         self.sample_weights(scale=scale)
         return self.forward(x)
 
+    def separate_mu_cov(self, pred):
+        mu = pred[:, :self.npars]
+        errors = pred[:, self.npars:]
+        c = make_triangular(errors, self.npars)
+        invcov = torch.einsum('...ij, ...kj -> ... ik', c, c)
+        return mu, invcov
+
+    def predict(self, x):
+        pred = self(x)
+        mu, invcov = self.separate_mu_cov(pred)
+        return mu, invcov
+
     def train(self, x_train, y_train, x_val, y_val, lr=1e-3, batch_size=32, num_workers=6, num_epochs=10000):
         """Train the model"""
 
@@ -168,10 +180,7 @@ class SWAGModel(nn.Module):
                 inp = x  # .cuda()
                 y = y  # .cuda()
                 pred = self(inp)
-                mu = pred[:, :self.npars]
-                errors = pred[:, self.npars:]
-                c = make_triangular(errors, self.npars)
-                invcov = torch.einsum('...ij, ...kj -> ... ik', c, c)
+                mu, invcov = self.separate_mu_cov(pred)
                 chi2 = torch.einsum('...j, ...jk, ...k -> ...', mu - y, invcov, mu - y)
                 loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(invcov), min=1e-25, max=1e25))
 
