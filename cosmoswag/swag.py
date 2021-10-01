@@ -57,12 +57,12 @@ class SWAGModel(nn.Module):
         self.npars = npars # The number of parameters
         nout = self.npars + self.npars * (self.npars + 1) // 2 # We output parameters and a covariance matrix
 
-        hidden = 128
+        hidden = 64
 
         layers = (
             [torch.nn.LayerNorm(nin)]
             + [torch.nn.Linear(nin, hidden), torch.nn.ReLU()]
-            + [[torch.nn.Linear(hidden, hidden), torch.nn.ReLU()][i%2] for i in range(2*2*2)]
+            + [[torch.nn.Linear(hidden, hidden), torch.nn.ReLU()][i%2] for i in range(2*2)]
             + [torch.nn.Linear(hidden, nout)]
         )
         self.out = torch.nn.Sequential(*layers)
@@ -136,8 +136,9 @@ class SWAGModel(nn.Module):
             D = self.pre_D - avg_w[:, None]  # [d, K]
             d = avg_w.shape[0]
             K = self.K
-            z_1 = torch.randn((1, d), device=self.device)
-            z_2 = torch.randn((K, 1), device=self.device)
+            z_1 = torch.randn((1, d))#, device=self.device)
+            z_2 = torch.randn((K, 1))#, device=self.device)
+
             sigma = torch.abs(torch.diag(avg_w2 - avg_w ** 2))
 
             w = avg_w[None] + scale * (1.0 / np.sqrt(2.0)) * z_1 @ sigma ** 0.5
@@ -145,6 +146,7 @@ class SWAGModel(nn.Module):
             w = w[0]
 
         self.load(w)
+        return w
 
     def forward_swag(self, x, scale=0.5):
         # Sample using SWAG using recorded model moments
