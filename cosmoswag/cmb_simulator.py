@@ -16,6 +16,7 @@ def generate_camb_cl(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.06, omk=0, tau=0.0
     pars.set_cosmology(H0=H0, ombh2=ombh2, omch2=omch2, mnu=mnu, omk=omk, tau=tau)
     pars.InitPower.set_params(As=As, ns=ns, r=r)
     pars.set_for_lmax(2500, lens_potential_accuracy=0);
+    pars.NonLinear = camb.model.NonLinear_none
     results = camb.get_results(pars)
     powers = results.get_cmb_power_spectra(pars, CMB_unit='muK')
     totCL = powers['total']
@@ -27,10 +28,24 @@ def bin_cls(cls, nl):
 
     N is approximately the number of elements left (although in reality it will be less than nl)
     """
-    binned_l = np.unique(np.logspace(0, np.log10(cls.shape[1]), nl, dtype='int'))
+    binned_l = np.unique(np.logspace(0, np.log10(cls.shape[1]), nl, dtype='int'))-1
     binned_cls = cls[:, binned_l]
     return binned_l, binned_cls
 
+def bin_cls_to(cls, bin_centers):
+    """ Return a binned version of the CLs for given bins
+    """
+    edges = bin_centers[1:] - (bin_centers[1:] - bin_centers[:-1])/2
+    binned = np.zeros([cls.shape[0], len(bin_centers)])
+    for i, _ in enumerate(edges):
+        if i==0:
+            binned[:,i] = np.mean(cls[:,:int(edges[0])], axis=1)
+        elif i==len(edges)-1:
+            binned[:,i] = np.mean(cls[:,int(edges[-1]):], axis=1)
+        else:
+            binned[:,i] = np.mean(cls[:,int(edges[i-1]):int(edges[i])], axis=1)
+
+    return binned
 
 def normalize_params(theta, mins=None, maxs=None):
     """ Normalize the parameters"""
@@ -127,7 +142,8 @@ def generate_sims(N, mins=None, maxs=None, save=True, path=None):
 
 
 if __name__ == '__main__':
-    cls, params = generate_sims(N=1, save=False)
-    assert (cls.shape == (1, 2549))
-    assert (params.shape == (1, 5))
+    N = 100000
+    cls, params = generate_sims(N=N, save=True)
+    assert (cls.shape == (N, 2549))
+    assert (params.shape == (N, 5))
     print('COMPLETED')

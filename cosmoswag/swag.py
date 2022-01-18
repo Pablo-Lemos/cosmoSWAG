@@ -55,7 +55,8 @@ class SWAGModel(nn.Module):
         self.c = 2
         self.current_epoch = 1
         self.npars = npars # The number of parameters
-        nout = self.npars + self.npars * (self.npars + 1) // 2 # We output parameters and a covariance matrix
+        nout = self.npars #+ self.npars * (self.npars + 1) // 2 # We output
+        # parameters and a covariance matrix
 
         hidden = 64
 
@@ -106,7 +107,7 @@ class SWAGModel(nn.Module):
                 p_vec = torch.cat((p_vec, p.reshape(-1)))
         return p_vec
 
-    def load(self, p_vec):
+    def load_weights(self, p_vec):
         # """Load a vector into the state dict"""
         cur_state_dict = self.state_dict()
         new_state_dict = OrderedDict()
@@ -145,7 +146,7 @@ class SWAGModel(nn.Module):
             w += scale * (D @ z_2).T / np.sqrt(2 * (K - 1))
             w = w[0]
 
-        self.load(w)
+        self.load_weights(w)
         return w
 
     def forward_swag(self, x, scale=0.5):
@@ -165,26 +166,37 @@ class SWAGModel(nn.Module):
         mu, invcov = self.separate_mu_cov(pred)
         return mu, invcov
 
-    def train(self, x_train, y_train, x_val, y_val, lr=1e-3, batch_size=32, num_workers=6, num_epochs=10000):
+    def train(self, x_train, y_train, delta_y = None, lr=1e-3,
+                batch_size=32, num_workers=6, num_epochs=10000,
+              pretrain = False, mom_freq=100, patience=20):
         """Train the model"""
 
-        #TODO Add early stopping
-        opt = torch.optim.Adam(self.parameters(), lr=1e-3)
+        opt = torch.optim.Adam(self.parameters(), lr=lr)
         losses = []
 
         dataset = data_utils.TensorDataset(x_train, y_train)
         trainloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
         count = 0
 
+        if pretrain:
+            num_steps_no_improv = 0
+            best_loss = 1e30
+
         for i in trange(num_epochs):
             for x, y in trainloader:
                 opt.zero_grad()
                 inp = x  # .cuda()
-                y = y  # .cuda()
-                pred = self(inp)
-                mu, invcov = self.separate_mu_cov(pred)
-                chi2 = torch.einsum('...j, ...jk, ...k -> ...', mu - y, invcov, mu - y)
-                loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(invcov), min=1e-25, max=1e25))
+                if delta_y:
+                    delta = torch.normal(0, delta_y)
+                    y = y + delta # .cuda()
+                mu = self(inp)
+
+                # mu, invcov = self.separate_mu_cov(pred)
+                # chi2 = torch.einsum('...j, ...jk, ...k -> ...', mu - y,
+                # invcov, mu - y)
+                # loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(
+                # invcov), min=1e-25, max=1e25))
+                loss = (mu - y) ** 2
 
                 loss = loss.mean()
                 loss.backward()
@@ -192,15 +204,26 @@ class SWAGModel(nn.Module):
                 opt.step()
                 count += 1
                 losses.append(loss.item())
+
                 if count % 1000 == 0 and count > 0:
-                    print(np.average(losses))
+                    print("Epoch", i, ". Avg loss =", np.average(losses))
+                    if pretrain:
+                        if np.average(losses) < best_loss:
+                            best_loss = np.average(losses)
+                            num_steps_no_improv = 0
+                        elif np.isfinite(np.average(losses)):
+                            num_steps_no_improv += 1
+
+                        if (num_steps_no_improv > patience):
+                            print("Early stopping after ", num_steps_no_improv,
+                                  "epochs, and", count, "steps.")
+                            break
                     losses = []
-                if count % 5 == 0 and i == num_epochs - 1:
+                if (not pretrain) and (count % mom_freq == 0):
                     self.aggregate_model()
 
     def save(self, path=None, name=None):
         """ Save the model"""
-        # TODO Miles, how can I load a saved model?
         if not name:
             name = 'swag'
 
@@ -209,4 +232,17 @@ class SWAGModel(nn.Module):
             path = os.path.join(dir_path, 'data/saved_models/', name)
 
         torch.save([self.state_dict(), self.w_avg, self.w2_avg, self.pre_D], path)
+
+    def load(self, path=None, name=None):
+        if not name:
+            name = 'swag'
+
+        if not path:
+            dir_path = os.path.dirname(os.path.realpath(__file__))
+            path = os.path.join(dir_path, 'data/saved_models/', name)
+
+        state_dict, self.w_avg, self.w2_avg, self.pre_D = torch.load(
+            path)
+        self.load_state_dict(state_dict)
+
 
