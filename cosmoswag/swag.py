@@ -154,6 +154,14 @@ class SWAGModel(nn.Module):
         self.sample_weights(scale=scale)
         return self.forward(x)
 
+    def generate_samples(self, x, nsamples, scale=0.5, verbose=True):
+        samples = torch.zeros([nsamples, x.shape[0], self.npars])
+        for i in range(nsamples):
+            if (i % 100) == 0 and (i > 0) and (verbose):
+                print(f"Generated {i} samples.")
+            samples[i] = self.forward_swag(x, scale=scale)
+        return samples
+
     def separate_mu_cov(self, pred):
         mu = pred[:, :self.npars]
         errors = pred[:, self.npars:]
@@ -186,9 +194,9 @@ class SWAGModel(nn.Module):
             for x, y in trainloader:
                 opt.zero_grad()
                 inp = x  # .cuda()
-                if delta_y:
+                if delta_y is not None:
                     delta = torch.normal(0, delta_y)
-                    y = y + delta # .cuda()
+                    inp = inp + delta # .cuda()
                 mu = self(inp)
 
                 # mu, invcov = self.separate_mu_cov(pred)
@@ -217,7 +225,7 @@ class SWAGModel(nn.Module):
                         if (num_steps_no_improv > patience):
                             print("Early stopping after ", num_steps_no_improv,
                                   "epochs, and", count, "steps.")
-                            break
+                            return None
                     losses = []
                 if (not pretrain) and (count % mom_freq == 0):
                     self.aggregate_model()
