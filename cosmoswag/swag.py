@@ -190,7 +190,8 @@ class SWAGModel(nn.Module):
             num_steps_no_improv = 0
             best_loss = 1e30
 
-        for i in trange(num_epochs):
+        t = trange(num_epochs, desc='loss', leave=True)
+        for i in t:
             for x, y in trainloader:
                 opt.zero_grad()
                 inp = x  # .cuda()
@@ -214,7 +215,9 @@ class SWAGModel(nn.Module):
                 losses.append(loss.item())
 
                 if count % 1000 == 0 and count > 0:
-                    print("Epoch", i, ". Avg loss =", np.average(losses))
+                    #print("Epoch", i, ". Avg loss =", np.average(losses))
+                    t.set_description(f"Loss = {np.average(losses) :.5f}",
+                                      refresh=True)
                     if pretrain:
                         if np.average(losses) < best_loss:
                             best_loss = np.average(losses)
