@@ -7,6 +7,7 @@ It also contains functions to use on the CLs, such as binning, normalizing...
 import os
 import numpy as np
 import camb
+import torch
 
 
 def generate_camb_cl(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.06, omk=0, tau=0.06, logA=2.5, ns=0.965, r=0):
@@ -56,6 +57,10 @@ def normalize_params(theta, mins=None, maxs=None):
 
     return (theta - mins) / (maxs - mins)
 
+def normalize_cls(cls):
+    """ Normalize the data"""
+    return (cls - np.mean(cls, axis=0, keepdims=True)) / np.sqrt(np.var(
+        cls, axis=0, keepdims=True))
 
 def unnormalize_params(theta, mins=None, maxs=None):
     """ Undo parameter normalization"""
@@ -140,6 +145,44 @@ def generate_sims(N, mins=None, maxs=None, save=True, path=None):
 
     return cls, params
 
+def read_data(path = None, binned = False, normalize = True):
+    if not path:
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        path = os.path.join(dir_path, 'data/')
+
+    cls = np.load(os.path.join(path, 'cmb_sims/cls.npy'))
+    params = np.load(os.path.join(path, 'cmb_sims/params.npy'))
+
+    truth_filename = "planck/COM_PowerSpect_CMB-TT-full_R3.01.txt" if binned \
+        else "planck/COM_PowerSpect_CMB-TT-full_R3.01.txt"
+    truth = np.loadtxt(os.path.join(path, truth_filename))
+
+    theta_norm = normalize_params(params)
+
+    if binned:
+        # Use only high ell
+        cls = cls[:, 29:]
+        cls = bin_cls_to(cls, truth[:, 0])
+        #cls[-1] = truth[:, 1]
+        # Last point is not calculated
+        cls = cls[:, :-1]
+        truth = truth[:-1]
+    else:
+        # Match to cls from data
+        cls = cls[:, :truth.shape[0]]
+
+    # Normalize
+    if normalize: cls = normalize_cls(cls)
+
+    error = truth[:, 2]
+
+    x_train = torch.tensor(cls[:-1000], dtype=torch.float32)
+    y_train = torch.tensor(theta_norm[:-1000], dtype=torch.float32)
+    x_val = torch.tensor(cls[-1000:], dtype=torch.float32)
+    y_val = torch.tensor(theta_norm[-1000:], dtype=torch.float32)
+    delta_y = torch.tensor(error, dtype=torch.float32)
+
+    return x_train, y_train, x_val, y_val, delta_y
 
 if __name__ == '__main__':
     N = 100000
