@@ -230,21 +230,20 @@ class SWAGModel(nn.Module):
                 if (not pretrain) and (count % mom_freq == 0):
                     self.aggregate_model()
 
-    def save(self, path=None, name=None):
+    def save(self, name=None, path=None):
         """ Save the model"""
         if not name:
-            name = 'swag'
+            name = 'swag.pt'
+            print("No name provided, using default: " + name)
 
         if not path:
             dir_path = os.path.dirname(os.path.realpath(__file__))
             path = os.path.join(dir_path, 'data/saved_models/', name)
+            print("No path provided, using default: " + path)
 
         torch.save([self.state_dict(), self.w_avg, self.w2_avg, self.pre_D], path)
 
-    def load(self, path=None, name=None):
-        if not name:
-            name = 'swag'
-
+    def load(self, name, path=None):
         if not path:
             dir_path = os.path.dirname(os.path.realpath(__file__))
             path = os.path.join(dir_path, 'data/saved_models/', name)
