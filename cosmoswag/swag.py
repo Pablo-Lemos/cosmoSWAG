@@ -140,9 +140,10 @@ class SWAGModel(nn.Module):
             z_1 = torch.randn((1, d))#, device=self.device)
             z_2 = torch.randn((K, 1))#, device=self.device)
 
-            sigma = torch.abs(torch.diag(avg_w2 - avg_w ** 2))
-
-            w = avg_w[None] + scale * (1.0 / np.sqrt(2.0)) * z_1 @ sigma ** 0.5
+            #sigma = torch.abs(torch.diag(avg_w2 - avg_w ** 2))
+            #w = avg_w[None] + scale * (1.0 / np.sqrt(2.0)) * z_1 @ sigma ** 0.5
+            w = avg_w[None] + scale * (1.0 / np.sqrt(2.0)) * z_1 * torch.abs(
+                avg_w2 - avg_w ** 2) ** 0.5
             w += scale * (D @ z_2).T / np.sqrt(2 * (K - 1))
             w = w[0]
 
