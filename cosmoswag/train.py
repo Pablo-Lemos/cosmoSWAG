@@ -1,4 +1,5 @@
-from cmb_simulator import read_data
+#from cmb_simulator import read_data
+from read_simulations import read_data
 from swag import SWAGModel
 
 def train():
@@ -15,7 +16,7 @@ def train():
     model.train(x_train, y_train, lr=1e-4, num_epochs=100, num_workers=0,
                 pretrain=False)
 
-    model.save("cmb_noiseless.pt")
+    model.save("sims.pt")
 
 
 if __name__ == "__main__":

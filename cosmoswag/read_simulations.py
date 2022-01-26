@@ -13,7 +13,7 @@ def read_data(n = 2000):
     os.chdir('/projects/QUIJOTE/Density_fields_3D')
 
     all_files = np.sort((np.sort((os.listdir()))[0:n]).astype('int32'))
-    f_params = '/home/pl7508/cosmoSWAG/miles/latin_hypercube_params.txt'
+    f_params = '/home/pl7508/cosmoSWAG/cosmoswag/data/galaxy_sims/latin_hypercube_params.txt'
     Om, Ob, h, ns, s8 = np.loadtxt(f_params, unpack=True)
     params_reformatted = np.array([Om, Ob, h, ns, s8])
 
@@ -76,5 +76,5 @@ def read_data(n = 2000):
     #dataset = data_utils.TensorDataset(inps, tgts)
 
     print('Finished reading data')
-
-    return train_out_torch, train_inp_torch, val_out_torch, val_inp_torch
+    # Also return a zero for the errors
+    return train_inp_torch, train_out_torch, val_inp_torch, val_out_torch, 0
