@@ -8,11 +8,11 @@ def train():
     model = SWAGModel(nin=nin, npars=npars)
 
     # Pre-training
-    model.train(x_train, y_train, lr=1e-4, num_epochs=5000, num_workers=8,
-                pretrain=True, patience=20)
+    model.train(x_train, y_train, lr=1e-4, num_epochs=10000, num_workers=0,
+                pretrain=True, patience=100)
 
     # Swag training
-    model.train(x_train, y_train, lr=1e-4, num_epochs=100, num_workers=8,
+    model.train(x_train, y_train, lr=1e-4, num_epochs=100, num_workers=0,
                 pretrain=False)
 
     model.save("cmb_noiseless.pt")
