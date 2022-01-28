@@ -10,3 +10,13 @@ def make_triangular(x, size):
         j+=n
         n-=1
     return mat
+
+def to_tensor(x):
+    if isinstance(x, torch.Tensor):
+        return x
+    else:
+        try:
+            x = torch.tensor(x, dtype = torch.float32)
+        except:
+            raise TypeError('Could not convert to tensor.')
+        return x

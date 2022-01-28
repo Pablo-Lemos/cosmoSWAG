@@ -8,6 +8,7 @@ import os
 import numpy as np
 import camb
 import torch
+from data_object import CMBDataObject
 
 
 def generate_camb_cl(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.06, omk=0, tau=0.06, logA=2.5, ns=0.965, r=0):
@@ -23,53 +24,6 @@ def generate_camb_cl(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.06, omk=0, tau=0.0
     totCL = powers['total']
     return totCL[2:, 0]
 
-
-def bin_cls(cls, nl):
-    """ Return a binned version of the CLs
-
-    N is approximately the number of elements left (although in reality it will be less than nl)
-    """
-    binned_l = np.unique(np.logspace(0, np.log10(cls.shape[1]), nl, dtype='int'))-1
-    binned_cls = cls[:, binned_l]
-    return binned_l, binned_cls
-
-def bin_cls_to(cls, bin_centers):
-    """ Return a binned version of the CLs for given bins
-    """
-    edges = bin_centers[1:] - (bin_centers[1:] - bin_centers[:-1])/2
-    binned = np.zeros([cls.shape[0], len(bin_centers)])
-    for i, _ in enumerate(edges):
-        if i==0:
-            binned[:,i] = np.mean(cls[:,:int(edges[0])], axis=1)
-        elif i==len(edges)-1:
-            binned[:,i] = np.mean(cls[:,int(edges[-1]):], axis=1)
-        else:
-            binned[:,i] = np.mean(cls[:,int(edges[i-1]):int(edges[i])], axis=1)
-
-    return binned
-
-def normalize_params(theta, mins=None, maxs=None):
-    """ Normalize the parameters"""
-    if maxs is None:
-        maxs = np.array([90, 0.05, 0.5, 3.5, 1])
-    if mins is None:
-        mins = np.array([50, 0.01, 0.01, 1.5, 0.8])
-
-    return (theta - mins) / (maxs - mins)
-
-def normalize_cls(cls):
-    """ Normalize the data"""
-    return (cls - np.mean(cls, axis=0, keepdims=True)) / np.sqrt(np.var(
-        cls, axis=0, keepdims=True))
-
-def unnormalize_params(theta, mins=None, maxs=None):
-    """ Undo parameter normalization"""
-    if maxs is None:
-        maxs = np.array([90, 0.05, 0.5, 3.5, 1])
-    if mins is None:
-        mins = np.array([50, 0.01, 0.01, 1.5, 0.8])
-
-    return theta * (maxs - mins) + mins
 
 def compute_derivatives(theta_fiducial, nl, step, normed = True):
     """ Calculate derivatives with respect to fiducial parameters (used for MOPDED compression)"""
@@ -145,44 +99,6 @@ def generate_sims(N, mins=None, maxs=None, save=True, path=None):
 
     return cls, params
 
-def read_data(path = None, binned = False, normalize = True):
-    if not path:
-        dir_path = os.path.dirname(os.path.realpath(__file__))
-        path = os.path.join(dir_path, 'data/')
-
-    cls = np.load(os.path.join(path, 'cmb_sims/cls.npy'))
-    params = np.load(os.path.join(path, 'cmb_sims/params.npy'))
-
-    truth_filename = "planck/COM_PowerSpect_CMB-TT-full_R3.01.txt" if binned \
-        else "planck/COM_PowerSpect_CMB-TT-full_R3.01.txt"
-    truth = np.loadtxt(os.path.join(path, truth_filename))
-
-    theta_norm = normalize_params(params)
-
-    if binned:
-        # Use only high ell
-        cls = cls[:, 29:]
-        cls = bin_cls_to(cls, truth[:, 0])
-        #cls[-1] = truth[:, 1]
-        # Last point is not calculated
-        cls = cls[:, :-1]
-        truth = truth[:-1]
-    else:
-        # Match to cls from data
-        cls = cls[:, :truth.shape[0]]
-
-    # Normalize
-    if normalize: cls = normalize_cls(cls)
-
-    error = truth[:, 2]
-
-    x_train = torch.tensor(cls[:-1000], dtype=torch.float32)
-    y_train = torch.tensor(theta_norm[:-1000], dtype=torch.float32)
-    x_val = torch.tensor(cls[-1000:], dtype=torch.float32)
-    y_val = torch.tensor(theta_norm[-1000:], dtype=torch.float32)
-    delta_y = torch.tensor(error, dtype=torch.float32)
-
-    return x_train, y_train, x_val, y_val, delta_y
 
 if __name__ == '__main__':
     N = 100000
