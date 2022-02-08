@@ -146,11 +146,11 @@ def read_data(path = None, binned = False, normalize = True):
     data = CMBDataObject(cls, params, truth, binned=binned,
                                norm_data=normalize)
 
-    x_train, y_train, x_val, y_val = data.get_data()
-    delta_y = data.get_error()
-    return x_train, y_train, x_val, y_val, delta_y
+    return data
 
 
 if __name__ == "__main__":
-    xtr, ytr, xval, yval, yerr = read_data()
-    print(xtr.shape, ytr.shape, xval.shape, yval.shape, yerr.shape)
+    data = read_data()
+    x_train, y_train, x_val, y_val = data.get_data()
+    delta_x = data.get_error()
+    print(x_train.shape, y_train.shape, x_val.shape, y_val.shape, delta_x.shape)

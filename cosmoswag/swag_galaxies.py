@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 import torch.utils.data as data_utils
 import os
 from utils import make_triangular
+import torchvision
 
 class RandomCrop(nn.Module):
     def __init__(self):
@@ -41,9 +42,9 @@ class PrintLayer(nn.Module):
         return x
 
 
-class SWAGModel(nn.Module):
+class SWAGModelGal(nn.Module):
 
-    def __init__(self, nin, npars):
+    def __init__(self, hidden=8, kernel=3):
         super(self.__class__, self).__init__()
 
         self.cropper = RandomCrop()
@@ -54,23 +55,62 @@ class SWAGModel(nn.Module):
         self.K = 20
         self.c = 2
         self.current_epoch = 1
-        self.npars = npars # The number of parameters
-        nout = self.npars #+ self.npars * (self.npars + 1) // 2 # We output
-        # parameters and a covariance matrix
+        self.npars = 5
 
-        hidden = 128
-
-        layers = (
-            [torch.nn.LayerNorm(nin)]
-            + [torch.nn.Linear(nin, hidden), torch.nn.ReLU()]
-            + [[torch.nn.Linear(hidden, hidden), torch.nn.ReLU()][i%2] for i
-               in range(2*2*2)]
-            + [torch.nn.Linear(hidden, nout)]
+        self.flipper = nn.Sequential(
+            torchvision.transforms.RandomHorizontalFlip(p=0.5),
+            torchvision.transforms.RandomVerticalFlip(p=0.5)
         )
-        self.out = torch.nn.Sequential(*layers)
 
-    def forward(self, x):
-        return self.out(x)
+        self.conv = nn.Sequential(
+            nn.Conv3d(1, hidden, kernel, dilation=1),
+            nn.ReLU(),
+            nn.Conv3d(hidden, hidden, kernel, dilation=1),
+            nn.ReLU(),
+            nn.Conv3d(hidden, hidden, kernel, dilation=1),
+            nn.ReLU(),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2),
+            nn.ReLU(),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2),
+            nn.ReLU(),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2),
+            nn.ReLU(),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2)
+
+        )
+        crop = 24
+        example_data = torch.zeros(1, 1, crop, crop, crop)
+        example_out = self.conv(example_data).mean((2, 3, 4))
+
+        self.out = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(example_out.shape[1], 100),
+            nn.ReLU(),
+            nn.Linear(100, 100),
+            nn.ReLU(),
+            nn.Linear(100, 100),
+            nn.ReLU(),
+            nn.Linear(100, 100),
+            nn.ReLU(),
+            nn.Linear(100, 5)  # will change 1 -> 5 for all parameters # change 5 -> 1 for predicting 1 parameter
+        )
+
+        self.default_crop_size = 24
+
+        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+    def forward(self, x, crop_size=None):
+        if crop_size is None:
+            crop_size = self.default_crop_size
+
+        x = self.cropper(x, (crop_size, crop_size, crop_size)) * 1000
+        x = self.flipper(x)
+        # print(x.shape)
+        x2 = self.conv(x)
+        # print(x2.shape)
+        x3 = x2.mean((2, 3, 4))
+
+        return self.out(x3)
 
     def aggregate_model(self):
         # """Aggregate parameters for SWA/SWAG"""
@@ -156,15 +196,11 @@ class SWAGModel(nn.Module):
         self.sample_weights(scale=scale)
         return self.forward(x)
 
-    def generate_samples(self, x, nsamples, delta_x = None, scale=0.5,
-                         verbose=True):
+    def generate_samples(self, x, nsamples, scale=0.5, verbose=True):
         samples = torch.zeros([nsamples, x.shape[0], self.npars])
         for i in range(nsamples):
             if (i % 100) == 0 and (i > 0) and (verbose):
                 print(f"Generated {i} samples.")
-            if delta_x is not None:
-                delta = torch.normal(0, delta_x)
-                x = x + delta
             samples[i] = self.forward_swag(x, scale=scale)
         return samples
 
@@ -180,7 +216,7 @@ class SWAGModel(nn.Module):
         mu, invcov = self.separate_mu_cov(pred)
         return mu, invcov
 
-    def train(self, x_train, y_train, delta_x = None, lr=1e-3,
+    def train(self, x_train, y_train, delta_y = None, lr=1e-3,
                 batch_size=32, num_workers=6, num_epochs=10000,
               pretrain = False, mom_freq=100, patience=20):
         """Train the model"""
@@ -201,17 +237,14 @@ class SWAGModel(nn.Module):
             for x, y in trainloader:
                 opt.zero_grad()
                 inp = x  # .cuda()
-                if delta_x is not None:
-                    delta = torch.normal(0, delta_x)
+                if delta_y is not None:
+                    delta = torch.normal(0, delta_y)
                     inp = inp + delta # .cuda()
                 mu = self(inp)
-
-                # mu, invcov = self.separate_mu_cov(pred)
-                # chi2 = torch.einsum('...j, ...jk, ...k -> ...', mu - y,
-                # invcov, mu - y)
-                # loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(
-                # invcov), min=1e-25, max=1e25))
-                loss = (mu - y) ** 2
+                # The params have an extr dimension
+                y = y[:,0]
+                assert(y.shape == mu.shape)
+                loss = (mu - y) ** 2 # This does not work/(y**2 + 1e-5)
 
                 loss = loss.mean()
                 loss.backward()
@@ -260,5 +293,4 @@ class SWAGModel(nn.Module):
         state_dict, self.w_avg, self.w2_avg, self.pre_D = torch.load(
             path)
         self.load_state_dict(state_dict)
-
 
