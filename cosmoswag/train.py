@@ -11,15 +11,16 @@ def train():
 
     # Pre-training
     model.train(x_train, y_train, delta_x=delta_x, lr=1e-4, num_epochs=10000, \
-                                                               num_workers=0,
-                pretrain=True, patience=100)
+                                                                num_workers=0,
+                 pretrain=True, patience=100)
 
+    model.save("cmb_noisy_clt_pretrain.pt")
     # Swag training
     model.train(x_train, y_train, delta_x=delta_x, lr=1e-4, num_epochs=100,
                 num_workers=0,
                 pretrain=False)
 
-    model.save("cmb_noisy.pt")
+    model.save("cmb_noisy_clt.pt")
 
 
 if __name__ == "__main__":

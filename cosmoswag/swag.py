@@ -10,7 +10,7 @@ from tqdm.auto import trange
 from torch.utils.data import DataLoader
 import torch.utils.data as data_utils
 import os
-from utils import make_triangular
+from utils import soft_clamp, make_triangular, cov3d
 
 class RandomCrop(nn.Module):
     def __init__(self):
@@ -54,9 +54,10 @@ class SWAGModel(nn.Module):
         self.K = 20
         self.c = 2
         self.current_epoch = 1
+        self.nin = nin
         self.npars = npars # The number of parameters
-        nout = self.npars #+ self.npars * (self.npars + 1) // 2 # We output
-        # parameters and a covariance matrix
+        nout = self.npars #int(2*self.npars) #+ self.npars * (self.npars + 1)
+        # // 2
 
         hidden = 128
 
@@ -67,6 +68,15 @@ class SWAGModel(nn.Module):
                in range(2*2*2)]
             + [torch.nn.Linear(hidden, nout)]
         )
+        # layers = (
+        #     [torch.nn.LayerNorm(nin)]
+        #     + [torch.nn.Linear(nin, 512), torch.nn.ReLU()]
+        #     + [torch.nn.Linear(512, 128), torch.nn.ReLU()]
+        #     + [torch.nn.Linear(128, 128), torch.nn.ReLU()]
+        #     + [torch.nn.Linear(128, 128), torch.nn.ReLU()]
+        #     + [torch.nn.Linear(128, nout)]
+        # )
+
         self.out = torch.nn.Sequential(*layers)
 
     def forward(self, x):
@@ -158,14 +168,20 @@ class SWAGModel(nn.Module):
 
     def generate_samples(self, x, nsamples, delta_x = None, scale=0.5,
                          verbose=True):
+        if delta_x is not None:
+            x = x + torch.normal(0, delta_x)
         samples = torch.zeros([nsamples, x.shape[0], self.npars])
         for i in range(nsamples):
             if (i % 100) == 0 and (i > 0) and (verbose):
                 print(f"Generated {i} samples.")
-            if delta_x is not None:
-                delta = torch.normal(0, delta_x)
-                x = x + delta
+            #if delta_x is not None:
+                #delta = torch.normal(0, delta_x)
+                #x = x + delta
             samples[i] = self.forward_swag(x, scale=scale)
+            #out = self.forward_swag(x, scale=scale)
+            #mu, log_sigma_squared = self.separate_mu_sigma(out)
+            #samples[i] = mu
+            #samples[i] = torch.normal(mu, torch.exp(log_sigma_squared)**0.5)
         return samples
 
     def separate_mu_cov(self, pred):
@@ -174,6 +190,11 @@ class SWAGModel(nn.Module):
         c = make_triangular(errors, self.npars)
         invcov = torch.einsum('...ij, ...kj -> ... ik', c, c)
         return mu, invcov
+
+    def separate_mu_sigma(self, pred):
+        mu = pred[:, :self.npars]
+        log_sigma_squared = soft_clamp(pred[:, self.npars:], -50, 50)
+        return mu, log_sigma_squared
 
     def predict(self, x):
         pred = self(x)
@@ -202,23 +223,46 @@ class SWAGModel(nn.Module):
                 opt.zero_grad()
                 inp = x  # .cuda()
                 if delta_x is not None:
-                    delta = torch.normal(0, delta_x)
-                    inp = inp + delta # .cuda()
+                    # delta = torch.normal(0, delta_x)
+                    # inp = inp + delta # .cuda()
+                    delta = torch.normal(0, torch.ones((30, 1)) * delta_x)
+                    inp = x.reshape(1, -1, self.nin) + delta.reshape(30, 1, -1)
+                    inp = inp.reshape(-1, self.nin)
+
                 mu = self(inp)
+                mu = mu.reshape(30, -1, self.npars)
+                #mu, log_sigma_squared = self.separate_mu_sigma(self(inp))
+
+                mean = torch.mean(mu, dim=0)
+                cov = cov3d(mu)
+                invcov = torch.linalg.inv(cov)
+                #assert all(torch.isfinite(mean))
+                #assert all(torch.isfinite(cov.reshape(-1)))
+                #mvn = torch.distributions.MultivariateNormal(loc = mean,covariance_matrix=cov)
 
                 # mu, invcov = self.separate_mu_cov(pred)
-                # chi2 = torch.einsum('...j, ...jk, ...k -> ...', mu - y,
-                # invcov, mu - y)
-                # loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(
-                # invcov), min=1e-25, max=1e25))
-                loss = (mu - y) ** 2
+                chi2 = torch.einsum('...j, ...jk, ...k -> ...', mean - y,
+                invcov, mu - y)
+                loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(
+                invcov), min=1e-25, max=1e25))
+                #loss = (mu - y) ** 2 / 2 / torch.exp(log_sigma_squared) +
+                # log_sigma_squared / 2
 
+                # r = torch.sqrt((mu - y) ** 2)
+                # mean = torch.mean(r, dim=0)
+                # sigma = torch.cov(r.T)/y.shape[0]**0.5
+
+                #loss = - mvn.log_prob(y)
                 loss = loss.mean()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.parameters(), 1.0)
+                #nn.utils.clip_grad_value_(self.parameters(), 10.0)
                 opt.step()
                 count += 1
                 losses.append(loss.item())
+
+                for p in opt.param_groups[0]['params']:
+                    assert all(torch.isfinite(p.reshape(-1)))
 
                 if count % 1000 == 0 and count > 0:
                     #print("Epoch", i, ". Avg loss =", np.average(losses))
