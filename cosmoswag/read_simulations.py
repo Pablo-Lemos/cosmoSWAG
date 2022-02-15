@@ -53,7 +53,7 @@ def read_data(n = 2000):
 
     # validation set
 
-    indices_val = np.arange(int(n*0.9), n, 1)
+    indices_val = np.arange(int(n*0.95), n, 1)
     val_inp = storing_data[indices_val, :, :]
     val_out = params_reformatted[:, indices_val]
 
