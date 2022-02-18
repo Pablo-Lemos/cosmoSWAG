@@ -23,8 +23,8 @@ class DataObject(object):
         self.xTrain, self.yTrain, self.xVal, self.yVal = self.split(data, params,
                                                                   validation_split)
         if norm_data:
-            self.xTrain, self.xVal = self.normalize_data(self.xTrain), \
-                                     self.normalize_data(self.xVal)
+            self.xTrain = self.normalize_data(self.xTrain)
+            self.xVal = self.normalize_data(self.xVal)
 
         self.paramMins, _ = torch.min(self.yTrain, dim=0)
         self.paramMaxs, _ = torch.max(self.yTrain, dim=0)
@@ -74,19 +74,8 @@ class DataObject(object):
 
 
 class CMBDataObject(DataObject):
-    def __init__(self, data, params, truth, binned=False,
-                 validation_split=0.1, norm_data=True):
-        self.truth = truth
-        if binned:
-            data = bin_cls_to(data, truth[:, 0])
-            data = data[:, :-1]
-            self.truth = self.truth[:-1]
-        else:
-            data = data[:, :truth.shape[0]]
-
+    def __init__(self, data, params, validation_split=0.1, norm_data=True):
         super().__init__(data, params, validation_split, norm_data)
-        truth = to_tensor(truth.T)
-        self.error = self.normalize_error(truth[-1])
 
     def normalize_error(self, error):
         """ Normalize the data"""
@@ -94,14 +83,51 @@ class CMBDataObject(DataObject):
         assert len(error) == self.dataSize, 'Wrong data size'
         return error if self.dataStd is None else error/self.dataStd
 
+    def read_truth(self, path=None, binned=False,
+                   filename="COM_PowerSpect_CMB-TT-full_R3.01.txt"):
+
+        if path is None:
+            dir_path = os.path.dirname(os.path.realpath(__file__))
+            path = os.path.join(dir_path, 'data/planck/')
+
+        truth = np.loadtxt(os.path.join(path, filename))
+
+        if binned:
+            self.xTrain = bin_cls_to(self.xTrain, truth[:, 0])
+            self.xVal = bin_cls_to(self.xVal, truth[:, 0])
+            self.xTrain = self.xTrain[:, :-1]
+            self.xVal = self.xVal[:, :-1]
+            truth = self.truth[:-1]
+        else:
+            self.xTrain = self.xTrain[:, :truth.shape[0]]
+            self.xVal = self.xVal[:, :truth.shape[0]]
+
+        # Adjust data size
+        self.dataSize = self.xTrain.shape[1]
+        self.dataMean = self.dataMean[:, :self.dataSize]
+        self.dataStd = self.dataStd[:, :self.dataSize]
+
+        truth = to_tensor(truth.T)
+
+        # Redo the normalization
+        if self.dataMean is not None:
+            self.truth = self.normalize_data(truth[1:2])
+
+        self.error = self.normalize_error(truth[-1])
+        self.ell = truth[0]
+
     def get_error(self):
         return self.error[0]
 
     def get_ell(self):
-        return self.truth[0]
+        return self.ell
+
+    def get_truth(self):
+        return self.truth
 
     def get_true_cls(self):
-        return self.truth[1]
+        return self.truth[1:2]
+
 
 def bin_cls(cls, nl):
     """ Return a binned version of the CLs
@@ -131,26 +157,24 @@ def bin_cls_to(cls, bin_centers):
         return binned
 
 
-def read_data(path = None, binned = False, normalize = True):
-    if not path:
+def read_data(path=None, normalize=True):
+    if path is None:
         dir_path = os.path.dirname(os.path.realpath(__file__))
         path = os.path.join(dir_path, 'data/')
 
     cls = np.load(os.path.join(path, 'cmb_sims/cls.npy'))
     params = np.load(os.path.join(path, 'cmb_sims/params.npy'))
 
-    truth_filename = "planck/COM_PowerSpect_CMB-TT-full_R3.01.txt" if binned \
-        else "planck/COM_PowerSpect_CMB-TT-full_R3.01.txt"
-    truth = np.loadtxt(os.path.join(path, truth_filename))
-
-    data = CMBDataObject(cls, params, truth, binned=binned,
-                               norm_data=normalize)
+    data = CMBDataObject(cls, params, norm_data=normalize)
+    #data.read_truth()
 
     return data
 
 
 if __name__ == "__main__":
     data = read_data()
+    data.read_truth()
     x_train, y_train, x_val, y_val = data.get_data()
     delta_x = data.get_error()
+    truth = data.get_truth()
     print(x_train.shape, y_train.shape, x_val.shape, y_val.shape, delta_x.shape)
