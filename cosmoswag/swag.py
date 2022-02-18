@@ -10,7 +10,7 @@ from tqdm.auto import trange
 from torch.utils.data import DataLoader
 import torch.utils.data as data_utils
 import os
-from utils import make_triangular
+from utils import soft_clamp, make_triangular, cov3d
 
 class RandomCrop(nn.Module):
     def __init__(self):
@@ -54,16 +54,18 @@ class SWAGModel(nn.Module):
         self.K = 20
         self.c = 2
         self.current_epoch = 1
+        self.nin = nin
         self.npars = npars # The number of parameters
-        nout = self.npars #+ self.npars * (self.npars + 1) // 2 # We output
-        # parameters and a covariance matrix
+        nout = self.npars #int(2*self.npars) #+ self.npars * (self.npars + 1)
+        # // 2
 
-        hidden = 64
+        hidden = 128
 
         layers = (
             [torch.nn.LayerNorm(nin)]
             + [torch.nn.Linear(nin, hidden), torch.nn.ReLU()]
-            + [[torch.nn.Linear(hidden, hidden), torch.nn.ReLU()][i%2] for i in range(2*2)]
+            + [[torch.nn.Linear(hidden, hidden), torch.nn.ReLU()][i%2] for i
+               in range(2*2*2)]
             + [torch.nn.Linear(hidden, nout)]
         )
         self.out = torch.nn.Sequential(*layers)
@@ -93,7 +95,7 @@ class SWAGModel(nn.Module):
                     self.pre_D = self.pre_D[:, 1:]
 
         self.n_models += 1
-        print("num agg = " + str(self.n_models))
+        #print("num agg = " + str(self.n_models))
 
     def flatten(self):
         # """Convert state dict into a vector"""
@@ -155,12 +157,14 @@ class SWAGModel(nn.Module):
         self.sample_weights(scale=scale)
         return self.forward(x)
 
-    def generate_samples(self, x, nsamples, scale=0.5, verbose=True):
+    def generate_samples(self, x, nsamples, delta_x = None, scale=0.5,
+                         verbose=True):
         samples = torch.zeros([nsamples, x.shape[0], self.npars])
         for i in range(nsamples):
             if (i % 100) == 0 and (i > 0) and (verbose):
                 print(f"Generated {i} samples.")
-            samples[i] = self.forward_swag(x, scale=scale)
+            xs = x + torch.normal(0, delta_x) if delta_x is not None else x
+            samples[i] = self.forward_swag(xs, scale=scale)
         return samples
 
     def separate_mu_cov(self, pred):
@@ -170,12 +174,17 @@ class SWAGModel(nn.Module):
         invcov = torch.einsum('...ij, ...kj -> ... ik', c, c)
         return mu, invcov
 
+    def separate_mu_sigma(self, pred):
+        mu = pred[:, :self.npars]
+        log_sigma_squared = soft_clamp(pred[:, self.npars:], -50, 50)
+        return mu, log_sigma_squared
+
     def predict(self, x):
         pred = self(x)
         mu, invcov = self.separate_mu_cov(pred)
         return mu, invcov
 
-    def train(self, x_train, y_train, delta_y = None, lr=1e-3,
+    def train(self, x_train, y_train, delta_x = None, lr=1e-3,
                 batch_size=32, num_workers=6, num_epochs=10000,
               pretrain = False, mom_freq=100, patience=20):
         """Train the model"""
@@ -196,21 +205,30 @@ class SWAGModel(nn.Module):
             for x, y in trainloader:
                 opt.zero_grad()
                 inp = x  # .cuda()
-                if delta_y is not None:
-                    delta = torch.normal(0, delta_y)
-                    inp = inp + delta # .cuda()
-                mu = self(inp)
+                if delta_x is not None:
+                    # delta = torch.normal(0, delta_x)
+                    # inp = inp + delta # .cuda()
+                    delta = torch.normal(0, torch.ones((30, 1)) * delta_x)
+                    inp = x.reshape(1, -1, self.nin) + delta.reshape(30, 1, -1)
+                    inp = inp.reshape(-1, self.nin)
 
-                # mu, invcov = self.separate_mu_cov(pred)
-                # chi2 = torch.einsum('...j, ...jk, ...k -> ...', mu - y,
-                # invcov, mu - y)
-                # loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(
-                # invcov), min=1e-25, max=1e25))
-                loss = (mu - y) ** 2
+                mu = self(inp)
+                mu = mu.reshape(30, -1, self.npars)
+
+
+                mean = torch.mean(mu, dim=0)
+                cov = cov3d(mu)
+                invcov = torch.linalg.inv(cov)
+
+                chi2 = torch.einsum('...j, ...jk, ...k -> ...', mean - y,
+                invcov, mu - y)
+                loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(
+                invcov), min=1e-25, max=1e25))
 
                 loss = loss.mean()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.parameters(), 1.0)
+                #nn.utils.clip_grad_value_(self.parameters(), 10.0)
                 opt.step()
                 count += 1
                 losses.append(loss.item())
