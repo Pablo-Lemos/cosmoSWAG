@@ -7,11 +7,9 @@ It also contains functions to use on the CLs, such as binning, normalizing...
 import os
 import numpy as np
 import camb
-import torch
-from data_object import CMBDataObject
 
 
-def generate_camb_cl(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.06, omk=0, tau=0.06, logA=2.5, ns=0.965, r=0):
+def generate_camb_cl(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.06, omk=0, tau=0.06, logA=3.05, ns=0.965, r=0):
     """ Generate a temperature power spectrum given cosmological parameters"""
     As = 1e-10 * np.exp(logA)
     pars = camb.CAMBparams()

@@ -68,15 +68,6 @@ class SWAGModel(nn.Module):
                in range(2*2*2)]
             + [torch.nn.Linear(hidden, nout)]
         )
-        # layers = (
-        #     [torch.nn.LayerNorm(nin)]
-        #     + [torch.nn.Linear(nin, 512), torch.nn.ReLU()]
-        #     + [torch.nn.Linear(512, 128), torch.nn.ReLU()]
-        #     + [torch.nn.Linear(128, 128), torch.nn.ReLU()]
-        #     + [torch.nn.Linear(128, 128), torch.nn.ReLU()]
-        #     + [torch.nn.Linear(128, nout)]
-        # )
-
         self.out = torch.nn.Sequential(*layers)
 
     def forward(self, x):
@@ -104,7 +95,7 @@ class SWAGModel(nn.Module):
                     self.pre_D = self.pre_D[:, 1:]
 
         self.n_models += 1
-        print("num agg = " + str(self.n_models))
+        #print("num agg = " + str(self.n_models))
 
     def flatten(self):
         # """Convert state dict into a vector"""
@@ -168,20 +159,12 @@ class SWAGModel(nn.Module):
 
     def generate_samples(self, x, nsamples, delta_x = None, scale=0.5,
                          verbose=True):
-        if delta_x is not None:
-            x = x + torch.normal(0, delta_x)
         samples = torch.zeros([nsamples, x.shape[0], self.npars])
         for i in range(nsamples):
             if (i % 100) == 0 and (i > 0) and (verbose):
                 print(f"Generated {i} samples.")
-            #if delta_x is not None:
-                #delta = torch.normal(0, delta_x)
-                #x = x + delta
-            samples[i] = self.forward_swag(x, scale=scale)
-            #out = self.forward_swag(x, scale=scale)
-            #mu, log_sigma_squared = self.separate_mu_sigma(out)
-            #samples[i] = mu
-            #samples[i] = torch.normal(mu, torch.exp(log_sigma_squared)**0.5)
+            xs = x + torch.normal(0, delta_x) if delta_x is not None else x
+            samples[i] = self.forward_swag(xs, scale=scale)
         return samples
 
     def separate_mu_cov(self, pred):
@@ -231,28 +214,17 @@ class SWAGModel(nn.Module):
 
                 mu = self(inp)
                 mu = mu.reshape(30, -1, self.npars)
-                #mu, log_sigma_squared = self.separate_mu_sigma(self(inp))
+
 
                 mean = torch.mean(mu, dim=0)
                 cov = cov3d(mu)
                 invcov = torch.linalg.inv(cov)
-                #assert all(torch.isfinite(mean))
-                #assert all(torch.isfinite(cov.reshape(-1)))
-                #mvn = torch.distributions.MultivariateNormal(loc = mean,covariance_matrix=cov)
 
-                # mu, invcov = self.separate_mu_cov(pred)
                 chi2 = torch.einsum('...j, ...jk, ...k -> ...', mean - y,
                 invcov, mu - y)
                 loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(
                 invcov), min=1e-25, max=1e25))
-                #loss = (mu - y) ** 2 / 2 / torch.exp(log_sigma_squared) +
-                # log_sigma_squared / 2
 
-                # r = torch.sqrt((mu - y) ** 2)
-                # mean = torch.mean(r, dim=0)
-                # sigma = torch.cov(r.T)/y.shape[0]**0.5
-
-                #loss = - mvn.log_prob(y)
                 loss = loss.mean()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.parameters(), 1.0)
@@ -260,9 +232,6 @@ class SWAGModel(nn.Module):
                 opt.step()
                 count += 1
                 losses.append(loss.item())
-
-                for p in opt.param_groups[0]['params']:
-                    assert all(torch.isfinite(p.reshape(-1)))
 
                 if count % 1000 == 0 and count > 0:
                     #print("Epoch", i, ". Avg loss =", np.average(losses))
