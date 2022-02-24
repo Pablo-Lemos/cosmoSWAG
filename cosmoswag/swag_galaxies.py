@@ -237,14 +237,23 @@ class SWAGModelGal(nn.Module):
             for x, y in trainloader:
                 opt.zero_grad()
                 inp = x  # .cuda()
-                if delta_y is not None:
-                    delta = torch.normal(0, delta_y)
-                    inp = inp + delta # .cuda()
+                if delta_x is not None:
+                    delta = torch.normal(0, torch.ones((30, 1)) * delta_x)
+                    inp = x.reshape(1, -1, self.nin) + delta.reshape(30, 1, -1)
+                    inp = inp.reshape(-1, self.nin)
+
                 mu = self(inp)
-                # The params have an extr dimension
-                y = y[:,0]
-                assert(y.shape == mu.shape)
-                loss = (mu - y) ** 2 # This does not work/(y**2 + 1e-5)
+                mu = mu.reshape(30, -1, self.npars)
+
+
+                mean = torch.mean(mu, dim=0)
+                cov = cov3d(mu)
+                invcov = torch.linalg.inv(cov)
+
+                chi2 = torch.einsum('...j, ...jk, ...k -> ...', mean - y,
+                invcov, mu - y)
+                loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(
+                invcov), min=1e-25, max=1e25))
 
                 loss = loss.mean()
                 loss.backward()
