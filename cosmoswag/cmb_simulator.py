@@ -7,14 +7,17 @@ It also contains functions to use on the CLs, such as binning, normalizing...
 import os
 import numpy as np
 import camb
+from camb.dark_energy import DarkEnergyPPF, DarkEnergyFluid
 
-
-def generate_camb_cl(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.06, omk=0, tau=0.06, logA=3.05, ns=0.965, r=0):
+def generate_camb_cl(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.06, omk=0,
+                     tau=0.06, logA=3.05, ns=0.965, r=0, w = -1, wa = 0):
     """ Generate a temperature power spectrum given cosmological parameters"""
     As = 1e-10 * np.exp(logA)
     pars = camb.CAMBparams()
     pars.set_cosmology(H0=H0, ombh2=ombh2, omch2=omch2, mnu=mnu, omk=omk, tau=tau)
     pars.InitPower.set_params(As=As, ns=ns, r=r)
+    if (w != -1 or wa != 0):
+        pars.DarkEnergy = DarkEnergyPPF(w=w, wa=wa)
     pars.set_for_lmax(2500, lens_potential_accuracy=0);
     pars.NonLinear = camb.model.NonLinear_none
     results = camb.get_results(pars)

@@ -221,7 +221,7 @@ class SWAGModel(nn.Module):
                 invcov = torch.linalg.inv(cov)
 
                 chi2 = torch.einsum('...j, ...jk, ...k -> ...', mean - y,
-                invcov, mu - y)
+                invcov, mean - y)
                 loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(
                 invcov), min=1e-25, max=1e25))
 
