@@ -10,7 +10,7 @@ from tqdm.auto import trange
 from torch.utils.data import DataLoader
 import torch.utils.data as data_utils
 import os
-from utils import soft_clamp, make_triangular, cov3d
+from utils import soft_clamp, make_triangular, logsumexp
 
 class RandomCrop(nn.Module):
     def __init__(self):
@@ -43,7 +43,7 @@ class PrintLayer(nn.Module):
 
 class SWAGModel(nn.Module):
 
-    def __init__(self, nin, npars):
+    def __init__(self, nin, npars, ncomps=1):
         super(self.__class__, self).__init__()
 
         self.cropper = RandomCrop()
@@ -54,10 +54,14 @@ class SWAGModel(nn.Module):
         self.K = 20
         self.c = 2
         self.current_epoch = 1
+        self.opt = None
         self.nin = nin
         self.npars = npars # The number of parameters
-        nout = self.npars #int(2*self.npars) #+ self.npars * (self.npars + 1)
-        # // 2
+        self.ncomps = ncomps
+        self.nout = int((2*self.npars + 1)*self.ncomps)
+
+        self._device = torch.device(
+            'cuda:0' if torch.cuda.is_available() else 'cpu')
 
         hidden = 128
 
@@ -66,7 +70,7 @@ class SWAGModel(nn.Module):
             + [torch.nn.Linear(nin, hidden), torch.nn.ReLU()]
             + [[torch.nn.Linear(hidden, hidden), torch.nn.ReLU()][i%2] for i
                in range(2*2*2)]
-            + [torch.nn.Linear(hidden, nout)]
+            + [torch.nn.Linear(hidden, self.nout)]
         )
         self.out = torch.nn.Sequential(*layers)
 
@@ -159,7 +163,7 @@ class SWAGModel(nn.Module):
 
     def generate_samples(self, x, nsamples, delta_x = None, scale=0.5,
                          verbose=True):
-        samples = torch.zeros([nsamples, x.shape[0], self.npars])
+        samples = torch.zeros([nsamples, x.shape[0], self.nout])
         for i in range(nsamples):
             if (i % 100) == 0 and (i > 0) and (verbose):
                 print(f"Generated {i} samples.")
@@ -179,18 +183,46 @@ class SWAGModel(nn.Module):
         log_sigma_squared = soft_clamp(pred[:, self.npars:], -50, 50)
         return mu, log_sigma_squared
 
+    def separate_gmm(self, pred):
+        mu = pred[:, :int(self.npars*self.ncomps)]
+        log_sigma_squared = pred[:, int(self.npars*self.ncomps):int(2*self.npars*self.ncomps)]
+        log_sigma_squared = soft_clamp(log_sigma_squared, -50, 50)
+        log_alphas = pred[:, int(2*self.npars*self.ncomps):]
+
+        # Shape: Data, comps, pars
+        mu = torch.reshape(mu, [-1, self.ncomps, self.npars])
+        log_sigma_squared = torch.reshape(log_sigma_squared, [-1, self.ncomps,
+                                                       self.npars])
+        # Normalize alphas
+        alphas = torch.exp(log_alphas)
+        alphas = alphas/torch.sum(alphas, keepdim=True, dim=1)
+        alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
+        return mu, log_sigma_squared, alphas
+
     def predict(self, x):
         pred = self(x)
         mu, invcov = self.separate_mu_cov(pred)
         return mu, invcov
+
+    def get_logp_gmm(self, mu, y, log_sigma_squared, alphas):
+        loss = (mu - y) ** 2 / 2 / torch.exp(
+            log_sigma_squared) + log_sigma_squared / 2
+
+        arg = loss + torch.log(alphas)
+        loss = torch.logsumexp(arg, dim=1, keepdim=False)
+        return loss
 
     def train(self, x_train, y_train, delta_x = None, lr=1e-3,
                 batch_size=32, num_workers=6, num_epochs=10000,
               pretrain = False, mom_freq=100, patience=20):
         """Train the model"""
 
-        opt = torch.optim.Adam(self.parameters(), lr=lr)
+        self.opt = torch.optim.Adam(self.parameters(), lr=lr)
         losses = []
+
+        x_train = x_train.to(self._device)
+        y_train = y_train.to(self._device)
+        delta_x = delta_x.to(self._device)
 
         dataset = data_utils.TensorDataset(x_train, y_train)
         trainloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
@@ -198,59 +230,50 @@ class SWAGModel(nn.Module):
 
         if pretrain:
             num_steps_no_improv = 0
-            best_loss = 1e30
+            best_loss = np.infty
 
         t = trange(num_epochs, desc='loss', leave=True)
         for i in t:
+            losses = []
             for x, y in trainloader:
-                opt.zero_grad()
-                inp = x  # .cuda()
+                self.opt.zero_grad()
+                inp = x
                 if delta_x is not None:
-                    # delta = torch.normal(0, delta_x)
-                    # inp = inp + delta # .cuda()
-                    delta = torch.normal(0, torch.ones((30, 1)) * delta_x)
-                    inp = x.reshape(1, -1, self.nin) + delta.reshape(30, 1, -1)
-                    inp = inp.reshape(-1, self.nin)
+                    delta = torch.normal(0, delta_x)
+                    inp = inp + delta
 
-                mu = self(inp)
-                mu = mu.reshape(30, -1, self.npars)
+                pred = self(inp)
+                mu, log_sigma_squared, alphas = self.separate_gmm(pred)
+                alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
+                y = torch.reshape(y, (-1, 1, self.npars))
 
-
-                mean = torch.mean(mu, dim=0)
-                cov = cov3d(mu)
-                invcov = torch.linalg.inv(cov)
-
-                chi2 = torch.einsum('...j, ...jk, ...k -> ...', mean - y,
-                invcov, mean - y)
-                loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(
-                invcov), min=1e-25, max=1e25))
-
+                loss = self.get_logp_gmm(mu, y, log_sigma_squared, alphas)
                 loss = loss.mean()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.parameters(), 1.0)
                 #nn.utils.clip_grad_value_(self.parameters(), 10.0)
-                opt.step()
+                self.opt.step()
                 count += 1
                 losses.append(loss.item())
 
-                if count % 1000 == 0 and count > 0:
-                    #print("Epoch", i, ". Avg loss =", np.average(losses))
-                    t.set_description(f"Loss = {np.average(losses) :.5f}",
-                                      refresh=True)
-                    if pretrain:
-                        if np.average(losses) < best_loss:
-                            best_loss = np.average(losses)
-                            num_steps_no_improv = 0
-                        elif np.isfinite(np.average(losses)):
-                            num_steps_no_improv += 1
 
-                        if (num_steps_no_improv > patience):
-                            print("Early stopping after ", num_steps_no_improv,
-                                  "epochs, and", count, "steps.")
-                            return None
-                    losses = []
-                if (not pretrain) and (count % mom_freq == 0):
-                    self.aggregate_model()
+            t.set_description(f"Loss = {np.average(losses) :.5f}",
+                              refresh=True)
+            self.current_epoch = i
+
+            if pretrain:
+                if np.average(losses) < best_loss:
+                    best_loss = np.average(losses)
+                    num_steps_no_improv = 0
+                elif np.isfinite(np.average(losses)):
+                    num_steps_no_improv += 1
+
+                if (num_steps_no_improv > patience):
+                    print("Early stopping after ", num_steps_no_improv,
+                          "epochs, and", count, "steps.")
+                    return None
+            else:
+                self.aggregate_model()
 
     def save(self, name=None, path=None):
         """ Save the model"""
@@ -263,15 +286,19 @@ class SWAGModel(nn.Module):
             path = os.path.join(dir_path, 'data/saved_models/', name)
             print("No path provided, using default: " + path)
 
-        torch.save([self.state_dict(), self.w_avg, self.w2_avg, self.pre_D], path)
+        torch.save([self.state_dict(), self.opt.state_dict(),
+                    self.current_epoch, self.w_avg,
+                    self.w2_avg, self.pre_D], path)
 
     def load(self, name, path=None):
         if not path:
             dir_path = os.path.dirname(os.path.realpath(__file__))
             path = os.path.join(dir_path, 'data/saved_models/', name)
 
-        state_dict, self.w_avg, self.w2_avg, self.pre_D = torch.load(
-            path)
-        self.load_state_dict(state_dict)
+        model_state_dict, opt_state_dict, current_epoch ,self.w_avg, self.w2_avg, self.pre_D = torch.load(path)
+        self.load_state_dict(model_state_dict)
+        if self.opt is None:
+            self.opt = torch.optim.Adam(self.parameters())
+        self.opt.load_state_dict(opt_state_dict)
 
 
