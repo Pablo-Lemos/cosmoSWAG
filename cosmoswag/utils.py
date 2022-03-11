@@ -1,9 +1,12 @@
 import torch
 
 
-def make_triangular(x, size):
+def make_triangular(x, size, device = None):
     assert size * (size + 1) // 2 == x.shape[1], 'Wrong size'
-    mat = torch.zeros([x.shape[0], size, size])
+    if device is not None:
+        mat = torch.zeros([x.shape[0], size, size], device=device)
+    else:
+        mat = torch.zeros([x.shape[0], size, size])
     j = 0
     n = size
     for i in range(size):

@@ -73,11 +73,11 @@ class SWAGModel(nn.Module):
         hidden = 128
 
         layers = (
-            [torch.nn.LayerNorm(nin)]
-            + [torch.nn.Linear(nin, hidden), torch.nn.ReLU()]
-            + [[torch.nn.Linear(hidden, hidden), torch.nn.ReLU()][i%2] for i
+            [torch.nn.LayerNorm(nin, device=self._device)]
+            + [torch.nn.Linear(nin, hidden, device=self._device), torch.nn.ReLU()]
+            + [[torch.nn.Linear(hidden, hidden, device=self._device), torch.nn.ReLU()][i%2] for i
                in range(2*2*2)]
-            + [torch.nn.Linear(hidden, self.nout)]
+            + [torch.nn.Linear(hidden, self.nout, device=self._device)]
         )
         self.out = torch.nn.Sequential(*layers)
 
@@ -181,7 +181,7 @@ class SWAGModel(nn.Module):
     def separate_mu_cov(self, pred):
         mu = pred[:, :self.npars]
         errors = pred[:, self.npars:]
-        c = make_triangular(errors, self.npars)
+        c = make_triangular(errors, self.npars, self._device)
         invcov = torch.einsum('...ij, ...kj -> ... ik', c, c)
         return mu, invcov
 
@@ -203,7 +203,7 @@ class SWAGModel(nn.Module):
             ihigh = ilow + int(self.npars*(self.npars + 1)//2 * self.ncomps)
             errors = pred[:, ilow:ihigh]
             errors = torch.reshape(errors, [-1, self.npars*(self.npars + 1)//2])
-            c = make_triangular(errors, self.npars)
+            c = make_triangular(errors, self.npars, self._device)
             invcov = torch.einsum('...ij, ...kj -> ... ik', c, c)
             sigma = torch.reshape(invcov, [-1, self.ncomps, self.npars,
                                             self.npars])
