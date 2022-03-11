@@ -43,7 +43,7 @@ class PrintLayer(nn.Module):
 
 class SWAGModel(nn.Module):
 
-    def __init__(self, nin, npars, ncomps=1):
+    def __init__(self, nin, npars, ncomps=1, cov_type="diag"):
         super(self.__class__, self).__init__()
 
         self.cropper = RandomCrop()
@@ -58,7 +58,14 @@ class SWAGModel(nn.Module):
         self.nin = nin
         self.npars = npars # The number of parameters
         self.ncomps = ncomps
-        self.nout = int((2*self.npars + 1)*self.ncomps)
+        self.cov_type = cov_type
+        if cov_type == "diag":
+            self.nout = int((2*self.npars + 1)*self.ncomps)
+        elif cov_type == "full":
+            self.nout = int((self.npars + self.npars * (self.npars + 1)//2 + 1) * self.ncomps)
+        else:
+            print("Covariance type not know")
+            raise
 
         self._device = torch.device(
             'cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -185,28 +192,47 @@ class SWAGModel(nn.Module):
 
     def separate_gmm(self, pred):
         mu = pred[:, :int(self.npars*self.ncomps)]
-        log_sigma_squared = pred[:, int(self.npars*self.ncomps):int(2*self.npars*self.ncomps)]
-        log_sigma_squared = soft_clamp(log_sigma_squared, -50, 50)
-        log_alphas = pred[:, int(2*self.npars*self.ncomps):]
+        ilow = int(self.npars * self.ncomps)
+        if self.cov_type == "diag":
+            ihigh = ilow + int(self.npars*self.ncomps)
+            log_sigma_squared = pred[:, ilow:ihigh]
+            log_sigma_squared = soft_clamp(log_sigma_squared, -50, 50)
+            sigma = torch.reshape(log_sigma_squared, [-1, self.ncomps,
+                                                     self.npars])
+        else:
+            ihigh = ilow + int(self.npars*(self.npars + 1)//2 * self.ncomps)
+            errors = pred[:, ilow:ihigh]
+            errors = torch.reshape(errors, [-1, self.npars*(self.npars + 1)//2])
+            c = make_triangular(errors, self.npars)
+            invcov = torch.einsum('...ij, ...kj -> ... ik', c, c)
+            sigma = torch.reshape(invcov, [-1, self.ncomps, self.npars,
+                                            self.npars])
+
+        log_alphas = pred[:, ihigh:]
 
         # Shape: Data, comps, pars
         mu = torch.reshape(mu, [-1, self.ncomps, self.npars])
-        log_sigma_squared = torch.reshape(log_sigma_squared, [-1, self.ncomps,
-                                                       self.npars])
         # Normalize alphas
         alphas = torch.exp(log_alphas)
         alphas = alphas/torch.sum(alphas, keepdim=True, dim=1)
         alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
-        return mu, log_sigma_squared, alphas
+        # sigma is log_sigma_squared for diagonal cov, invcov for full
+        return mu, sigma, alphas
 
     def predict(self, x):
         pred = self(x)
         mu, invcov = self.separate_mu_cov(pred)
         return mu, invcov
 
-    def get_logp_gmm(self, mu, y, log_sigma_squared, alphas):
-        loss = (mu - y) ** 2 / 2 / torch.exp(
-            log_sigma_squared) + log_sigma_squared / 2
+    def get_logp_gmm(self, mu, y, sigma, alphas):
+        if self.cov_type == "diag":
+            loss = (mu - y) ** 2 / 2 / torch.exp(sigma) + sigma / 2
+        else:
+            alphas = alphas[:,:,0]
+            chi2 = torch.einsum('...j, ...jk, ...k -> ...', mu - y,
+                                sigma, mu - y)
+            loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(sigma),
+                                                         min=1e-25, max=1e25))
 
         arg = loss + torch.log(alphas)
         loss = torch.logsumexp(arg, dim=1, keepdim=False)
@@ -243,11 +269,11 @@ class SWAGModel(nn.Module):
                     inp = inp + delta
 
                 pred = self(inp)
-                mu, log_sigma_squared, alphas = self.separate_gmm(pred)
+                mu, sigma, alphas = self.separate_gmm(pred)
                 alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
                 y = torch.reshape(y, (-1, 1, self.npars))
 
-                loss = self.get_logp_gmm(mu, y, log_sigma_squared, alphas)
+                loss = self.get_logp_gmm(mu, y, sigma, alphas)
                 loss = loss.mean()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.parameters(), 1.0)
