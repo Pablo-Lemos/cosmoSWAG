@@ -75,19 +75,19 @@ class SWAGModelGal(nn.Module):
         )
 
         self.conv = nn.Sequential(
-            nn.Conv3d(1, hidden, kernel, dilation=1, device=),
+            nn.Conv3d(1, hidden, kernel, dilation=1),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=1, device=),
+            nn.Conv3d(hidden, hidden, kernel, dilation=1),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=1, device=),
+            nn.Conv3d(hidden, hidden, kernel, dilation=1),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=)
+            nn.Conv3d(hidden, hidden, kernel, dilation=2)
 
         )
         crop = 24
@@ -96,15 +96,15 @@ class SWAGModelGal(nn.Module):
 
         self.out = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(example_out.shape[1], 100, device=),
+            nn.Linear(example_out.shape[1], 100),
             nn.ReLU(),
-            nn.Linear(100, 100, device=),
+            nn.Linear(100, 100),
             nn.ReLU(),
-            nn.Linear(100, 100, device=),
+            nn.Linear(100, 100),
             nn.ReLU(),
-            nn.Linear(100, 100, device=),
+            nn.Linear(100, 100),
             nn.ReLU(),
-            nn.Linear(100, self.npars, device=)  # will change 1 -> 5 for all
+            nn.Linear(100, self.npars)  # will change 1 -> 5 for all
             # parameters # change 5 -> 1 for predicting 1 parameter
         )
 
