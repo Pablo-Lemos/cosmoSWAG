@@ -44,7 +44,7 @@ class PrintLayer(nn.Module):
 
 class SWAGModelGal(nn.Module):
 
-    def __init__(self, hidden=8, kernel=3):
+    def __init__(self, hidden=8, kernel=3, ncomps=1, cov_type=diag):
         super(self.__class__, self).__init__()
 
         self.cropper = RandomCrop()
@@ -55,8 +55,19 @@ class SWAGModelGal(nn.Module):
         self.K = 20
         self.c = 2
         self.current_epoch = 1
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.npars = 5
+        self.npars = 5 # The number of parameters
+        self.ncomps = ncomps
+        self.cov_type = cov_type
+        if cov_type == "diag":
+            self.nout = int((2*self.npars + 1)*self.ncomps)
+        elif cov_type == "full":
+            self.nout = int((self.npars + self.npars * (self.npars + 1)//2 + 1) * self.ncomps)
+        else:
+            print("Covariance type not know")
+            raise
+
+        self._device = torch.device('cuda' if torch.cuda.is_available() else
+                                    'cpu')
 
         self.flipper = nn.Sequential(
             torchvision.transforms.RandomHorizontalFlip(p=0.5),
@@ -64,19 +75,19 @@ class SWAGModelGal(nn.Module):
         )
 
         self.conv = nn.Sequential(
-            nn.Conv3d(1, hidden, kernel, dilation=1),
+            nn.Conv3d(1, hidden, kernel, dilation=1, device=self._device),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=1),
+            nn.Conv3d(hidden, hidden, kernel, dilation=1, device=self._device),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=1),
+            nn.Conv3d(hidden, hidden, kernel, dilation=1, device=self._device),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=2),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=self._device),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=2),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=self._device),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=2),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=self._device),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=2)
+            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=self._device)
 
         )
         crop = 24
@@ -85,15 +96,15 @@ class SWAGModelGal(nn.Module):
 
         self.out = nn.Sequential(
             nn.Flatten(),
-	    nn.Linear(example_out.shape[1], 100),
+            nn.Linear(example_out.shape[1], 100, device=self._device),
             nn.ReLU(),
-            nn.Linear(100, 100),
+            nn.Linear(100, 100, device=self._device),
             nn.ReLU(),
-            nn.Linear(100, 100),
+            nn.Linear(100, 100, device=self._device),
             nn.ReLU(),
-            nn.Linear(100, 100),
+            nn.Linear(100, 100, device=self._device),
             nn.ReLU(),
-            nn.Linear(100, self.npars)  # will change 1 -> 5 for all
+            nn.Linear(100, self.npars, device=self._device)  # will change 1 -> 5 for all
             # parameters # change 5 -> 1 for predicting 1 parameter
         )
 
