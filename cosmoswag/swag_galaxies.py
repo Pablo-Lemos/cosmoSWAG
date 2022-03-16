@@ -44,7 +44,7 @@ class PrintLayer(nn.Module):
 
 class SWAGModelGal(nn.Module):
 
-    def __init__(self, hidden=8, kernel=3, ncomps=1, cov_type=diag):
+    def __init__(self, hidden=8, kernel=3, ncomps=1, cov_type="diag"):
         super(self.__class__, self).__init__()
 
         self.cropper = RandomCrop()
