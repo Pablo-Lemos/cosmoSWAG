@@ -283,8 +283,7 @@ class SWAGModel(nn.Module):
                 losses.append(loss.item())
 
 
-            t.set_description(f"Loss = {np.average(losses) :.5f}",
-                              refresh=True)
+            t.set_description(f"Loss = {np.average(losses) :.5f}", refresh=True)
             self.current_epoch = i
 
             if pretrain:
@@ -321,7 +320,12 @@ class SWAGModel(nn.Module):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             path = os.path.join(dir_path, 'data/saved_models/', name)
 
-        model_state_dict, opt_state_dict, current_epoch ,self.w_avg, self.w2_avg, self.pre_D = torch.load(path)
+        try:
+            model_state_dict, opt_state_dict, current_epoch ,self.w_avg, self.w2_avg, self.pre_D = torch.load(path)
+        except:
+            model_state_dict, opt_state_dict, current_epoch ,self.w_avg, \
+            self.w2_avg, self.pre_D = torch.load(path, map_location=torch.device('cpu'))
+
         self.load_state_dict(model_state_dict)
         if self.opt is None:
             self.opt = torch.optim.Adam(self.parameters())

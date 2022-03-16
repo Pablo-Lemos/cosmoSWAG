@@ -10,7 +10,7 @@ from tqdm.auto import trange
 from torch.utils.data import DataLoader
 import torch.utils.data as data_utils
 import os
-from utils import make_triangular
+from utils import *
 import torchvision
 
 class RandomCrop(nn.Module):
@@ -55,6 +55,7 @@ class SWAGModelGal(nn.Module):
         self.K = 20
         self.c = 2
         self.current_epoch = 1
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.npars = 5
 
         self.flipper = nn.Sequential(
@@ -84,7 +85,7 @@ class SWAGModelGal(nn.Module):
 
         self.out = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(example_out.shape[1], 100),
+	    nn.Linear(example_out.shape[1], 100),
             nn.ReLU(),
             nn.Linear(100, 100),
             nn.ReLU(),
@@ -92,12 +93,11 @@ class SWAGModelGal(nn.Module):
             nn.ReLU(),
             nn.Linear(100, 100),
             nn.ReLU(),
-            nn.Linear(100, 5)  # will change 1 -> 5 for all parameters # change 5 -> 1 for predicting 1 parameter
+            nn.Linear(100, self.npars)  # will change 1 -> 5 for all
+            # parameters # change 5 -> 1 for predicting 1 parameter
         )
 
         self.default_crop_size = 24
-
-        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     def forward(self, x, crop_size=None):
         if crop_size is None:
@@ -178,8 +178,8 @@ class SWAGModelGal(nn.Module):
             D = self.pre_D - avg_w[:, None]  # [d, K]
             d = avg_w.shape[0]
             K = self.K
-            z_1 = torch.randn((1, d))#, device=self.device)
-            z_2 = torch.randn((K, 1))#, device=self.device)
+            z_1 = torch.randn((1, d))
+            z_2 = torch.randn((K, 1))
 
             #sigma = torch.abs(torch.diag(avg_w2 - avg_w ** 2))
             #w = avg_w[None] + scale * (1.0 / np.sqrt(2.0)) * z_1 @ sigma ** 0.5
@@ -211,18 +211,65 @@ class SWAGModelGal(nn.Module):
         invcov = torch.einsum('...ij, ...kj -> ... ik', c, c)
         return mu, invcov
 
+    def separate_gmm(self, pred):
+        mu = pred[:, :int(self.npars*self.ncomps)]
+        ilow = int(self.npars * self.ncomps)
+        if self.cov_type == "diag":
+            ihigh = ilow + int(self.npars*self.ncomps)
+            log_sigma_squared = pred[:, ilow:ihigh]
+            log_sigma_squared = soft_clamp(log_sigma_squared, -50, 50)
+            sigma = torch.reshape(log_sigma_squared, [-1, self.ncomps,
+                                                     self.npars])
+        else:
+            ihigh = ilow + int(self.npars*(self.npars + 1)//2 * self.ncomps)
+            errors = pred[:, ilow:ihigh]
+            errors = torch.reshape(errors, [-1, self.npars*(self.npars + 1)//2])
+            c = make_triangular(errors, self.npars, self._device)
+            invcov = torch.einsum('...ij, ...kj -> ... ik', c, c)
+            sigma = torch.reshape(invcov, [-1, self.ncomps, self.npars,
+                                            self.npars])
+
+        log_alphas = pred[:, ihigh:]
+
+        # Shape: Data, comps, pars
+        mu = torch.reshape(mu, [-1, self.ncomps, self.npars])
+        # Normalize alphas
+        alphas = torch.exp(log_alphas)
+        alphas = alphas/torch.sum(alphas, keepdim=True, dim=1)
+        alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
+        # sigma is log_sigma_squared for diagonal cov, invcov for full
+        return mu, sigma, alphas
+
     def predict(self, x):
         pred = self(x)
         mu, invcov = self.separate_mu_cov(pred)
         return mu, invcov
 
-    def train(self, x_train, y_train, delta_y = None, lr=1e-3,
+    def get_logp_gmm(self, mu, y, sigma, alphas):
+        if self.cov_type == "diag":
+            loss = (mu - y) ** 2 / 2 / torch.exp(sigma) + sigma / 2
+        else:
+            alphas = alphas[:,:,0]
+            chi2 = torch.einsum('...j, ...jk, ...k -> ...', mu - y,
+                                sigma, mu - y)
+            loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(sigma),
+                                                         min=1e-25, max=1e25))
+
+        arg = loss + torch.log(alphas)
+        loss = torch.logsumexp(arg, dim=1, keepdim=False)
+        return loss
+
+    def train(self, x_train, y_train, delta_x = None, lr=1e-3,
                 batch_size=32, num_workers=6, num_epochs=10000,
               pretrain = False, mom_freq=100, patience=20):
         """Train the model"""
 
-        opt = torch.optim.Adam(self.parameters(), lr=lr)
+        self.opt = torch.optim.Adam(self.parameters(), lr=lr)
         losses = []
+
+        x_train = x_train.to(self._device)
+        y_train = y_train.to(self._device)
+        delta_x = delta_x.to(self._device)
 
         dataset = data_utils.TensorDataset(x_train, y_train)
         trainloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
@@ -230,56 +277,49 @@ class SWAGModelGal(nn.Module):
 
         if pretrain:
             num_steps_no_improv = 0
-            best_loss = 1e30
+            best_loss = np.infty
 
         t = trange(num_epochs, desc='loss', leave=True)
         for i in t:
+            losses = []
             for x, y in trainloader:
-                opt.zero_grad()
-                inp = x  # .cuda()
+                self.opt.zero_grad()
+                inp = x
                 if delta_x is not None:
-                    delta = torch.normal(0, torch.ones((30, 1)) * delta_x)
-                    inp = x.reshape(1, -1, self.nin) + delta.reshape(30, 1, -1)
-                    inp = inp.reshape(-1, self.nin)
+                    delta = torch.normal(0, delta_x)
+                    inp = inp + delta
 
-                mu = self(inp)
-                mu = mu.reshape(30, -1, self.npars)
+                pred = self(inp)
+                mu, sigma, alphas = self.separate_gmm(pred)
+                alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
+                y = torch.reshape(y, (-1, 1, self.npars))
 
-
-                mean = torch.mean(mu, dim=0)
-                cov = cov3d(mu)
-                invcov = torch.linalg.inv(cov)
-
-                chi2 = torch.einsum('...j, ...jk, ...k -> ...', mean - y,
-                invcov, mu - y)
-                loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(
-                invcov), min=1e-25, max=1e25))
-
+                loss = self.get_logp_gmm(mu, y, sigma, alphas)
                 loss = loss.mean()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.parameters(), 1.0)
-                opt.step()
+                #nn.utils.clip_grad_value_(self.parameters(), 10.0)
+                self.opt.step()
                 count += 1
                 losses.append(loss.item())
 
-                if count % 1000 == 0 and count > 0:
-                    #print("Epoch", i, ". Avg loss =", np.average(losses))
-                    t.set_description(f"Loss = {np.average(losses) :.5f}",
-                                      refresh=True)
-                    if pretrain:
-                        if np.average(losses) < best_loss:
-                            best_loss = np.average(losses)
-                            num_steps_no_improv = 0
-                        elif np.isfinite(np.average(losses)):
-                            num_steps_no_improv += 1
 
-                        if (num_steps_no_improv > patience):
-                            print("Early stopping after ", num_steps_no_improv,
-                                  "epochs, and", count, "steps.")
-                            return None
-                    losses = []
-                if (not pretrain) and (count % mom_freq == 0):
-                    self.aggregate_model()
+            t.set_description(f"Loss = {np.average(losses) :.5f}", refresh=True)
+            self.current_epoch = i
+
+            if pretrain:
+                if np.average(losses) < best_loss:
+                    best_loss = np.average(losses)
+                    num_steps_no_improv = 0
+                elif np.isfinite(np.average(losses)):
+                    num_steps_no_improv += 1
+
+                if (num_steps_no_improv > patience):
+                    print("Early stopping after ", num_steps_no_improv,
+                          "epochs, and", count, "steps.")
+                    return None
+            else:
+                self.aggregate_model()
 
     def save(self, name=None, path=None):
         """ Save the model"""
@@ -292,14 +332,24 @@ class SWAGModelGal(nn.Module):
             path = os.path.join(dir_path, 'data/saved_models/', name)
             print("No path provided, using default: " + path)
 
-        torch.save([self.state_dict(), self.w_avg, self.w2_avg, self.pre_D], path)
+        torch.save([self.state_dict(), self.opt.state_dict(),
+                    self.current_epoch, self.w_avg,
+                    self.w2_avg, self.pre_D], path)
 
     def load(self, name, path=None):
         if not path:
             dir_path = os.path.dirname(os.path.realpath(__file__))
             path = os.path.join(dir_path, 'data/saved_models/', name)
 
-        state_dict, self.w_avg, self.w2_avg, self.pre_D = torch.load(
-            path)
-        self.load_state_dict(state_dict)
+        try:
+            model_state_dict, opt_state_dict, current_epoch ,self.w_avg, self.w2_avg, self.pre_D = torch.load(path)
+        except:
+            model_state_dict, opt_state_dict, current_epoch ,self.w_avg, \
+            self.w2_avg, self.pre_D = torch.load(path, map_location=torch.device('cpu'))
+
+        self.load_state_dict(model_state_dict)
+        if self.opt is None:
+            self.opt = torch.optim.Adam(self.parameters())
+        self.opt.load_state_dict(opt_state_dict)
+
 
