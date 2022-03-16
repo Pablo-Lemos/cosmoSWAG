@@ -75,19 +75,19 @@ class SWAGModelGal(nn.Module):
         )
 
         self.conv = nn.Sequential(
-            nn.Conv3d(1, hidden, kernel, dilation=1, device=self._device),
+            nn.Conv3d(1, hidden, kernel, dilation=1, device=),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=1, device=self._device),
+            nn.Conv3d(hidden, hidden, kernel, dilation=1, device=),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=1, device=self._device),
+            nn.Conv3d(hidden, hidden, kernel, dilation=1, device=),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=self._device),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=self._device),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=self._device),
+            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=),
             nn.ReLU(),
-            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=self._device)
+            nn.Conv3d(hidden, hidden, kernel, dilation=2, device=)
 
         )
         crop = 24
@@ -96,15 +96,15 @@ class SWAGModelGal(nn.Module):
 
         self.out = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(example_out.shape[1], 100, device=self._device),
+            nn.Linear(example_out.shape[1], 100, device=),
             nn.ReLU(),
-            nn.Linear(100, 100, device=self._device),
+            nn.Linear(100, 100, device=),
             nn.ReLU(),
-            nn.Linear(100, 100, device=self._device),
+            nn.Linear(100, 100, device=),
             nn.ReLU(),
-            nn.Linear(100, 100, device=self._device),
+            nn.Linear(100, 100, device=),
             nn.ReLU(),
-            nn.Linear(100, self.npars, device=self._device)  # will change 1 -> 5 for all
+            nn.Linear(100, self.npars, device=)  # will change 1 -> 5 for all
             # parameters # change 5 -> 1 for predicting 1 parameter
         )
 
@@ -235,7 +235,7 @@ class SWAGModelGal(nn.Module):
             ihigh = ilow + int(self.npars*(self.npars + 1)//2 * self.ncomps)
             errors = pred[:, ilow:ihigh]
             errors = torch.reshape(errors, [-1, self.npars*(self.npars + 1)//2])
-            c = make_triangular(errors, self.npars, self._device)
+            c = make_triangular(errors, self.npars, )
             invcov = torch.einsum('...ij, ...kj -> ... ik', c, c)
             sigma = torch.reshape(invcov, [-1, self.ncomps, self.npars,
                                             self.npars])
@@ -277,10 +277,6 @@ class SWAGModelGal(nn.Module):
 
         self.opt = torch.optim.Adam(self.parameters(), lr=lr)
         losses = []
-
-        x_train = x_train.to(self._device)
-        y_train = y_train.to(self._device)
-        delta_x = delta_x.to(self._device)
 
         dataset = data_utils.TensorDataset(x_train, y_train)
         trainloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
