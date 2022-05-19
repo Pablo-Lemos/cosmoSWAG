@@ -146,13 +146,20 @@ class SWAGModel(nn.Module):
         self.sample_weights(scale=scale)
         return self.forward(x)
 
-    def generate_samples(self, x, nsamples, delta_x = None, scale=0.5,
-                         verbose=True):
+    def generate_samples(self, x, nsamples, delta_x = None, cov_x = None, scale=0.5, verbose=True):
         samples = torch.zeros([nsamples, x.shape[0], self.nout])
         for i in range(nsamples):
             if (i % 100) == 0 and (i > 0) and (verbose):
                 print(f"Generated {i} samples.")
-            xs = x + torch.normal(0, delta_x) if delta_x is not None else x
+            if delta_x is not None:
+                xs = x + torch.normal(0, delta_x) if delta_x is not None else x
+            elif cov_x is not None:
+                m = torch.distributions.multivariate_normal \
+                    .MultivariateNormal(torch.zeros(cov_x.shape[0]),
+                                        covariance_matrix=cov_x)
+                xs = x + m.sample()
+            else:
+                xs = x
             samples[i] = self.forward_swag(xs, scale=scale)
         return samples
 
@@ -216,7 +223,7 @@ class SWAGModel(nn.Module):
         loss = torch.logsumexp(arg, dim=1, keepdim=False)
         return loss
 
-    def train(self, x_train, y_train, delta_x = None, lr=1e-3,
+    def train(self, x_train, y_train, delta_x = None, cov_x = None, lr=1e-3,
                 batch_size=32, num_workers=6, num_epochs=10000,
               pretrain = False, mom_freq=100, patience=20):
         """Train the model"""
