@@ -79,9 +79,19 @@ class CMBDataObject(DataObject):
 
     def normalize_error(self, error):
         """ Normalize the data"""
-        assert len(error.shape) == 1, 'Data must be two dimensional'
+        assert len(error.shape) == 1, 'Data must be one dimensional'
         assert len(error) == self.dataSize, 'Wrong data size'
         return error if self.dataStd is None else error/self.dataStd
+
+    def normalize_covariance(self, cov):
+        """ Normalize the data"""
+        assert len(cov.shape) == 2, 'Data must be two dimensional'
+        assert cov.shape[0] == self.dataSize, 'Wrong data size'
+        if self.dataStd is None:
+            return cov
+        else:
+            d = np.outer(self.dataStd, self.dataStd)
+            return cov/d
 
     def read_truth(self, path=None, binned=False,
                    filename="COM_PowerSpect_CMB-TT-full_R3.01.txt"):
@@ -163,6 +173,20 @@ def read_data(path=None, normalize=True):
         path = os.path.join(dir_path, 'data/')
 
     cls = np.load(os.path.join(path, 'cmb_sims/cls.npy'))
+    params = np.load(os.path.join(path, 'cmb_sims/params.npy'))
+
+    data = CMBDataObject(cls, params, norm_data=normalize)
+    #data.read_truth()
+
+    return data
+
+
+def read_binned_data(path=None, normalize=True):
+    if path is None:
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        path = os.path.join(dir_path, 'data/')
+
+    cls = np.load(os.path.join(path, 'cmb_sims/cls_binned.npy'))
     params = np.load(os.path.join(path, 'cmb_sims/params.npy'))
 
     data = CMBDataObject(cls, params, norm_data=normalize)

@@ -248,7 +248,13 @@ class SWAGModel(nn.Module):
 
         x_train = x_train.to(self._device)
         y_train = y_train.to(self._device)
-        delta_x = delta_x.to(self._device)
+        if delta_x is not None:
+            delta_x = delta_x.to(self._device)
+        elif cov_x is not None:
+            cov_x = cov_x.to(self._device)
+            m = torch.distributions.multivariate_normal \
+                .MultivariateNormal(torch.zeros(cov_x.shape[0]),
+                                    covariance_matrix=cov_x)
 
         dataset = data_utils.TensorDataset(x_train, y_train)
         trainloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
@@ -266,6 +272,9 @@ class SWAGModel(nn.Module):
                 inp = x
                 if delta_x is not None:
                     delta = torch.normal(0, delta_x)
+                    inp = inp + delta
+                elif cov_x is not None:
+                    delta = m.sample()
                     inp = inp + delta
 
                 pred = self(inp)
