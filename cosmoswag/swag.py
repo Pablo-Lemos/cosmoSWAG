@@ -12,26 +12,6 @@ import torch.utils.data as data_utils
 import os
 from utils import soft_clamp, make_triangular, logsumexp
 
-class RandomCrop(nn.Module):
-    def __init__(self):
-        super(self.__class__, self).__init__()
-
-    def forward(self, x, shape):
-        # print(x.shape)
-        shape = torch.tensor(list(shape)).to(device=x.device)
-        input_shape = torch.tensor(x.shape[2:], device=x.device)
-        start_x = torch.tensor([torch.randint(
-            low=0,
-            high=input_shape[i] - shape[i],
-            size=()) for i in range(3)]).to(device=x.device)
-        end_x = start_x + shape
-        cropped = x[:, :,
-                  start_x[0]:end_x[0],
-                  start_x[1]:end_x[1],
-                  start_x[2]:end_x[2]]
-        return cropped
-
-
 class PrintLayer(nn.Module):
     def __init__(self):
         super(PrintLayer, self).__init__()
@@ -46,7 +26,6 @@ class SWAGModel(nn.Module):
     def __init__(self, nin, npars, ncomps=1, cov_type="diag"):
         super(self.__class__, self).__init__()
 
-        self.cropper = RandomCrop()
         self.w_avg = None
         self.w2_avg = None
         self.pre_D = None
@@ -73,8 +52,7 @@ class SWAGModel(nn.Module):
         hidden = 128
 
         layers = (
-            [torch.nn.LayerNorm(nin, device=self._device)]
-            + [torch.nn.Linear(nin, hidden, device=self._device), torch.nn.ReLU()]
+            [torch.nn.Linear(nin, hidden, device=self._device), torch.nn.ReLU()]
             + [[torch.nn.Linear(hidden, hidden, device=self._device), torch.nn.ReLU()][i%2] for i
                in range(2*2*2)]
             + [torch.nn.Linear(hidden, self.nout, device=self._device)]
