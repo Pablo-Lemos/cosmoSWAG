@@ -12,19 +12,11 @@ import torch.utils.data as data_utils
 import os
 from utils import soft_clamp, make_triangular, logsumexp
 
-class PrintLayer(nn.Module):
-    def __init__(self):
-        super(PrintLayer, self).__init__()
-
-    def forward(self, x):
-        # Do your print / debug stuff here
-        return x
-
-
 class SWAGModel(nn.Module):
 
     def __init__(self, nin, npars, ncomps=1, cov_type="diag"):
-        super(self.__class__, self).__init__()
+        #super(self.__class__, self).__init__()
+        nn.Module.__init__(self)
 
         self.w_avg = None
         self.w2_avg = None
@@ -49,18 +41,6 @@ class SWAGModel(nn.Module):
         self._device = torch.device(
             'cuda:0' if torch.cuda.is_available() else 'cpu')
 
-        hidden = 128
-
-        layers = (
-            [torch.nn.Linear(nin, hidden, device=self._device), torch.nn.ReLU()]
-            + [[torch.nn.Linear(hidden, hidden, device=self._device), torch.nn.ReLU()][i%2] for i
-               in range(2*2*2)]
-            + [torch.nn.Linear(hidden, self.nout, device=self._device)]
-        )
-        self.out = torch.nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.out(x)
 
     def aggregate_model(self):
         # """Aggregate parameters for SWA/SWAG"""
@@ -84,7 +64,6 @@ class SWAGModel(nn.Module):
                     self.pre_D = self.pre_D[:, 1:]
 
         self.n_models += 1
-        #print("num agg = " + str(self.n_models))
 
     def flatten(self):
         # """Convert state dict into a vector"""
