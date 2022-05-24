@@ -1,3 +1,2 @@
-cosmoswag/data/cmb_sims/*.npy filter=lfs diff=lfs merge=lfs -text
-cosmoswag/data/planck/COM_PowerSpect_CMB-TT-* filter=lfs diff=lfs merge=lfs -text
-cobaya/chains/sim.* filter=lfs diff=lfs merge=lfs -text
+examples/CMB/data/planck/planck_binned.txt filter=lfs diff=lfs merge=lfs -text
+examples/CMB/data/cmb_sims/* filter=lfs diff=lfs merge=lfs -text
