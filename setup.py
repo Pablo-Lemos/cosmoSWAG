@@ -9,7 +9,6 @@ setup(name='cosmoswag',
       url='https://github.com/Pablo-Lemos/cosmoSWAG',
       packages=find_packages(),
       install_requires=[
-    	  "jupyter",
           "numpy"
           "torch",
       ])

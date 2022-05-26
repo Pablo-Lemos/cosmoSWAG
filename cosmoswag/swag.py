@@ -10,7 +10,7 @@ from tqdm.auto import trange
 from torch.utils.data import DataLoader
 import torch.utils.data as data_utils
 import os
-from utils import soft_clamp, make_triangular, logsumexp
+from .utils import soft_clamp, make_triangular, logsumexp
 
 class SWAGModel(nn.Module):
 
@@ -210,8 +210,6 @@ class SWAGModel(nn.Module):
         self.opt = torch.optim.Adam(self.parameters(), lr=lr)
         losses = []
 
-        x_train = x_train.to(self._device)
-        y_train = y_train.to(self._device)
         if delta_x is not None:
             delta_x = delta_x.to(self._device)
         elif cov_x is not None:
@@ -233,7 +231,8 @@ class SWAGModel(nn.Module):
             losses = []
             for x, y in trainloader:
                 self.opt.zero_grad()
-                inp = x
+                inp = x.to(self._device)
+                out = y.to(self._device)
                 if delta_x is not None:
                     delta = torch.normal(0, delta_x)
                     inp = inp + delta
@@ -244,7 +243,7 @@ class SWAGModel(nn.Module):
                 pred = self(inp)
                 mu, sigma, alphas = self.separate_gmm(pred)
                 alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
-                y = torch.reshape(y, (-1, 1, self.npars))
+                y = torch.reshape(out, (-1, 1, self.npars))
 
                 loss = self.get_logp_gmm(mu, y, sigma, alphas)
                 loss = loss.mean()
