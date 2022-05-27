@@ -278,10 +278,13 @@ class SWAGModel(nn.Module):
             name = 'swag.pt'
             print("No name provided, using default: " + name)
 
-        if not path:
+        if path is None:
             dir_path = os.path.dirname(os.path.realpath(__file__))
-            path = os.path.join(dir_path, 'data/saved_models/', name)
-            print("No path provided, using default: " + path)
+            print("No path provided, using default: " + dir_path)
+        else:
+            dir_path = path
+        
+        path = os.path.join(dir_path, 'data/saved_models/', name)
 
         torch.save([self.state_dict(), self.opt.state_dict(),
                     self.current_epoch, self.w_avg,
