@@ -202,9 +202,10 @@ class SWAGModel(nn.Module):
         loss = torch.logsumexp(arg, dim=1, keepdim=False)
         return loss
 
-    def train(self, x_train, y_train, delta_x = None, cov_x = None, lr=1e-3,
+    def train(self, x_train, y_train, delta_x=None, cov_x=None, lr=1e-3,
                 batch_size=32, num_workers=6, num_epochs=10000,
-              pretrain = False, mom_freq=100, patience=20):
+              pretrain=False, mom_freq=100, patience=20, save_every=0
+              save_name=None, save_path=None):
         """Train the model"""
 
         self.opt = torch.optim.Adam(self.parameters(), lr=lr)
@@ -254,6 +255,8 @@ class SWAGModel(nn.Module):
                 count += 1
                 losses.append(loss.item())
 
+            if ((save_every > 0) and (i%save_every) == 0 and (i>0)): 
+                self.save(name=name, path=path) 
 
             t.set_description(f"Loss = {np.average(losses) :.5f}", refresh=True)
             self.current_epoch = i
