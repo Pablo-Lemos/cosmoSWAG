@@ -84,7 +84,8 @@ def train():
 
     # Pre-training
     model.train(x_train, y_train, lr=1e-4, num_epochs=250, num_workers=4,
-                pretrain=True, patience=20, batch_size=16)
+                pretrain=True, patience=20, batch_size=16, save_every=50, 
+                save_name="mesh_pretrained.pt", save_path=model_path)
 
     model.save("mesh_pretrained.pt", path=model_path)
     

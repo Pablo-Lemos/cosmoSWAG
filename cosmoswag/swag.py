@@ -204,7 +204,7 @@ class SWAGModel(nn.Module):
 
     def train(self, x_train, y_train, delta_x=None, cov_x=None, lr=1e-3,
                 batch_size=32, num_workers=6, num_epochs=10000,
-              pretrain=False, mom_freq=100, patience=20, save_every=0
+              pretrain=False, mom_freq=100, patience=20, save_every=0,
               save_name=None, save_path=None):
         """Train the model"""
 
@@ -256,7 +256,7 @@ class SWAGModel(nn.Module):
                 losses.append(loss.item())
 
             if ((save_every > 0) and (i%save_every == 0) and (i>0)): 
-                self.save(name=name, path=path) 
+                self.save(name=save_name, path=save_path) 
 
             t.set_description(f"Loss = {np.average(losses) :.5f}", refresh=True)
             self.current_epoch = i
