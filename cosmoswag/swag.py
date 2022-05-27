@@ -255,7 +255,7 @@ class SWAGModel(nn.Module):
                 count += 1
                 losses.append(loss.item())
 
-            if ((save_every > 0) and (i%save_every) == 0 and (i>0)): 
+            if ((save_every > 0) and (i%save_every == 0) and (i>0)): 
                 self.save(name=name, path=path) 
 
             t.set_description(f"Loss = {np.average(losses) :.5f}", refresh=True)
