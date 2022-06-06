@@ -14,7 +14,7 @@ from .utils import soft_clamp, make_triangular, logsumexp
 
 class SWAGModel(nn.Module):
 
-    def __init__(self, nin, npars, ncomps=1, cov_type="diag"):
+    def __init__(self, nin, npars, ncomps=1, cov_type="diag", device=None):
         #super(self.__class__, self).__init__()
         nn.Module.__init__(self)
 
@@ -38,9 +38,14 @@ class SWAGModel(nn.Module):
             print("Covariance type not known")
             raise
 
-        self._device = torch.device(
-            'cuda:0' if torch.cuda.is_available() else 'cpu')
+        if device is None:
+            self._device = torch.device(
+                'cuda:0' if torch.cuda.is_available() else 'cpu')
+        else: 
+            self._device = device
 
+    def get_device(self):
+        return self._device
 
     def aggregate_model(self):
         # """Aggregate parameters for SWA/SWAG"""
