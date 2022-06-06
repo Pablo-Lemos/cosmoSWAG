@@ -35,7 +35,7 @@ class SWAGModel(nn.Module):
         elif cov_type == "full":
             self.nout = int((self.npars + self.npars * (self.npars + 1)//2 + 1) * self.ncomps)
         else:
-            print("Covariance type not know")
+            print("Covariance type not known")
             raise
 
         self._device = torch.device(
@@ -125,21 +125,42 @@ class SWAGModel(nn.Module):
         self.sample_weights(scale=scale)
         return self.forward(x)
 
+    def add_noise(self, x, delta_x = None, cov_x = None):
+        # Add noise to the input
+        if delta_x is not None:
+            xs = x + torch.normal(0, delta_x) 
+        elif cov_x is not None:
+            m = torch.distributions.multivariate_normal \
+                .MultivariateNormal(torch.zeros(cov_x.shape[0]),
+                                    covariance_matrix=cov_x)
+            xs = x + m.sample()
+        else:
+            xs = x
+        return xs
+
     def generate_samples(self, x, nsamples, delta_x = None, cov_x = None, scale=0.5, verbose=True):
         samples = torch.zeros([nsamples, x.shape[0], self.nout])
         for i in range(nsamples):
             if (i % 100) == 0 and (i > 0) and (verbose):
                 print(f"Generated {i} samples.")
-            if delta_x is not None:
-                xs = x + torch.normal(0, delta_x) if delta_x is not None else x
-            elif cov_x is not None:
-                m = torch.distributions.multivariate_normal \
-                    .MultivariateNormal(torch.zeros(cov_x.shape[0]),
-                                        covariance_matrix=cov_x)
-                xs = x + m.sample()
-            else:
-                xs = x
+            xs = self.add_noise(x, delta_x, cov_x)
             samples[i] = self.forward_swag(xs, scale=scale)
+        return samples
+
+    def sample_gmm(self, x, nsamples, delta_x = None, cov_x = None):
+        # Sample from a GMM
+        assert len(x.shape) == 2, "Input must be a 2D tensor"
+        assert x.shape[1] == self.nin, "Wrong input size"
+        x = self.add_noise(x, delta_x, cov_x)
+        mu, invcov, alphas = self.separate_gmm(self(x))
+        samples = torch.zeros([nsamples, x.shape[0], self.nout])
+        r = torch.rand([nsamples, x.shape[0], 1])
+        for i in range(self.ncomps):
+            m = torch.distributions.multivariate_normal.MultivariateNormal(
+                mu[:,i], precision_matrix = invcov[:,i])
+            b = ((r > 0) * (r < alphas[:,i]))
+            r = r - alphas[:,i].reshape([1, -1, 1])
+            samples = samples + b*m.sample([nsamples])
         return samples
 
     def separate_mu_cov(self, pred):
