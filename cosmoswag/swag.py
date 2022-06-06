@@ -255,7 +255,7 @@ class SWAGModel(nn.Module):
                 count += 1
                 losses.append(loss.item())
 
-            if ((save_every > 0) and (i%save_every == 0) and (i>0)): 
+            if ((save_every > 0) and (i%save_every == 0)): 
                 self.save(name=save_name, path=save_path) 
 
             t.set_description(f"Loss = {np.average(losses) :.5f}", refresh=True)
@@ -283,20 +283,26 @@ class SWAGModel(nn.Module):
 
         if path is None:
             dir_path = os.path.dirname(os.path.realpath(__file__))
+            path = os.path.join(dir_path, 'data/saved_models/')
             print("No path provided, using default: " + dir_path)
-        else:
-            dir_path = path
         
-        path = os.path.join(dir_path, 'data/saved_models/', name)
+        path = os.path.join(path, name)
 
         torch.save([self.state_dict(), self.opt.state_dict(),
                     self.current_epoch, self.w_avg,
                     self.w2_avg, self.pre_D], path)
 
     def load(self, name, path=None):
-        if not path:
+        if path is None:
             dir_path = os.path.dirname(os.path.realpath(__file__))
-            path = os.path.join(dir_path, 'data/saved_models/', name)
+            path = os.path.join(dir_path, 'data/saved_models/')
+            print("No path provided, using default: " + dir_path)
+
+        path = os.path.join(path, name)
+
+        if not os.path.isfile(path):
+            print("File does not exist: " + path)
+            return None 
 
         try:
             model_state_dict, opt_state_dict, current_epoch ,self.w_avg, self.w2_avg, self.pre_D = torch.load(path)

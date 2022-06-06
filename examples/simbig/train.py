@@ -74,7 +74,7 @@ def train():
 
     print(x_train.shape, y_train.shape, x_val.shape, y_val.shape)
     model = SWAG_simbig(npars=5, kernel=3, ncomps=3, cov_type="full").cuda()
-    # model.load("mesh.pt", path=model_path)
+    model.load("mesh_pretrained.pt", path=model_path)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     #if torch.cuda.device_count() > 1:
@@ -93,6 +93,7 @@ def train():
     model.train(x_train, y_train, lr=2e-4, num_epochs=50, num_workers=4,
                 pretrain=False, batch_size=16)
 
+    model.save("mesh.pt", path=model_path)
     #y_pred = model.forward(x_val.cuda())
     #y_pred = y_pred*(high[0]-low[0]) + low[0]
     #torch.save(y_pred, os.path.join(path, "val_pred.pt"))
