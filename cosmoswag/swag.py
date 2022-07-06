@@ -242,7 +242,7 @@ class SWAGModel(nn.Module):
         elif cov_x is not None:
             cov_x = cov_x.to(self._device)
             m = torch.distributions.multivariate_normal \
-                .MultivariateNormal(torch.zeros(cov_x.shape[0]),
+                .MultivariateNormal(torch.zeros(cov_x.shape[0], device=self._device),
                                     covariance_matrix=cov_x)
 
         dataset = data_utils.TensorDataset(x_train, y_train)
