@@ -291,12 +291,14 @@ class SWAGModel(nn.Module):
                 if np.average(losses) < best_loss:
                     best_loss = np.average(losses)
                     num_steps_no_improv = 0
+                    best_state_dict = self.state_dict()
                 elif np.isfinite(np.average(losses)):
                     num_steps_no_improv += 1
 
                 if (num_steps_no_improv > patience):
                     print("Early stopping after ", num_steps_no_improv,
                           "epochs, and", count, "steps.")
+                    self.load_state_dict(best_state_dict)
                     return None
             else:
                 self.aggregate_model()
