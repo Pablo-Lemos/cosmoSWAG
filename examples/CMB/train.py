@@ -1,5 +1,5 @@
 from data_object import read_data
-from swag import SWAGModel
+from cosmoswag import SWAGModel
 import torch
 
 class SWAG_CMB(SWAGModel):
@@ -33,14 +33,14 @@ def train():
                                                                 num_workers=0,
                  pretrain=True, patience=20)
 
-    model.save("cmb_gmn_pretrained.pt")
+    model.save("cmb_gmn_v3_pretrained.pt")
 
     # Swag training
-    model.train(x_train, y_train, delta_x=delta_x, lr=2e-4, num_epochs=100,
+    model.train(x_train, y_train, delta_x=delta_x, lr=1e-4, num_epochs=100,
                 num_workers=0,
                 pretrain=False)
 
-    model.save("cmb_gmn.pt")
+    model.save("cmb_gmn_v3.pt")
 
 
 if __name__ == "__main__":

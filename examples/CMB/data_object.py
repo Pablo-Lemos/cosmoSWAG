@@ -1,7 +1,7 @@
 import os
 import torch
 import numpy as np
-from utils import to_tensor
+from cosmoswag import to_tensor
 
 
 class DataObject(object):
