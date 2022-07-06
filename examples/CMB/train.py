@@ -27,27 +27,28 @@ def train():
     x_train, y_train, x_val, y_val = data.get_data()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     path = os.path.join(dir_path, 'data/cmb_sims/cls_binned_cov.npy')
+    model_path = os.path.join(dir_path, 'data/saved_models/')
     cov_x = np.load(path)
     cov_x = torch.tensor(cov_x, dtype = torch.float32)
     cov_x = data.normalize_covariance(cov_x) 
 
     nin = x_train.shape[1]
     npars = y_train.shape[1]
-    model = SWAG_CMB(nin=nin, npars=npars, ncomps=3,cov_type="full", nHidden=128, nLayers=6)
+    model = SWAG_CMB(nin=nin, npars=npars, ncomps=1, cov_type="full", nHidden=128, nLayers=6)
 
     # Pre-training
     model.train(x_train, y_train, cov_x=cov_x, lr=1e-4, num_epochs=1000, \
                                                                 num_workers=0,
                  pretrain=True, patience=20)
 
-    model.save("cmb_binned_pretrained_v3.pt")
+    model.save("cmb_gmn_binned_pretrained_v3.pt", path=model_path)
 
     # Swag training
-    #model.train(x_train, y_train, cov_x=cov_x, lr=1e-4, num_epochs=100,
-    #            num_workers=0,
-    #            pretrain=False)
+    model.train(x_train, y_train, cov_x=cov_x, lr=1e-4, num_epochs=100,
+                num_workers=0,
+                pretrain=False)
 
-    #model.save("cmb_binned_v3.pt")
+    model.save("cmb_gmn_binned_v3.pt", path=model_path)
 
 
 if __name__ == "__main__":
