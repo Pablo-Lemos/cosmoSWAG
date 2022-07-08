@@ -14,7 +14,7 @@ from .utils import soft_clamp, make_triangular, logsumexp
 
 class SWAGModel(nn.Module):
 
-    def __init__(self, nin, npars, ncomps=1, cov_type="diag", device=None):
+    def __init__(self, nin, npars, ncomps=1, cov_type=None, device=None):
         #super(self.__class__, self).__init__()
         nn.Module.__init__(self)
 
@@ -30,7 +30,9 @@ class SWAGModel(nn.Module):
         self.npars = npars # The number of parameters
         self.ncomps = ncomps
         self.cov_type = cov_type
-        if cov_type == "diag":
+        if cov_type is None:
+            self.nout = npars
+        elif cov_type == "diag":
             self.nout = int((2*self.npars + 1)*self.ncomps)
         elif cov_type == "full":
             self.nout = int((self.npars + self.npars * (self.npars + 1)//2 + 1) * self.ncomps)
@@ -215,6 +217,8 @@ class SWAGModel(nn.Module):
         return mu, invcov
 
     def get_logp_gmm(self, mu, y, sigma, alphas):
+        if self.cov_type is None:
+            loss = (mu - y) ** 2
         if self.cov_type == "diag":
             loss = (mu - y) ** 2 / 2 / torch.exp(sigma) + sigma / 2
         else:

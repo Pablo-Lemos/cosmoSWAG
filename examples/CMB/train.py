@@ -1,4 +1,4 @@
-from data_object import read_data
+from data_object import read_binned_data
 from cosmoswag import SWAGModel
 import torch
 import os 
@@ -22,7 +22,7 @@ class SWAG_CMB(SWAGModel):
 
 
 def train():
-    data = read_data()
+    data = read_binned_data()
     data.read_truth(filename="planck_binned.txt")
     x_train, y_train, x_val, y_val = data.get_data()
     dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -37,9 +37,9 @@ def train():
     model = SWAG_CMB(nin=nin, npars=npars, ncomps=1, cov_type="full", nHidden=128, nLayers=6)
 
     # Pre-training
-    model.train(x_train, y_train, cov_x=cov_x, lr=1e-4, num_epochs=1000, \
+    model.train(x_train, y_train, cov_x=cov_x, lr=1e-4, num_epochs=10000, \
                                                                 num_workers=0,
-                 pretrain=True, patience=20)
+                 pretrain=True, patience=50)
 
     model.save("cmb_gmn_binned_pretrained_v3.pt", path=model_path)
 
