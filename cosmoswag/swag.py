@@ -234,12 +234,11 @@ class SWAGModel(nn.Module):
 
     def train(self, x_train, y_train, delta_x=None, cov_x=None, lr=1e-3,
                 batch_size=32, num_workers=6, num_epochs=10000,
-              pretrain=False, mom_freq=100, patience=20, save_every=0,
+              pretrain=False, weight_decay=0, patience=20, save_every=0,
               save_name=None, save_path=None):
         """Train the model"""
 
-        self.opt = torch.optim.Adam(self.parameters(), lr=lr)
-        losses = []
+        self.opt = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
 
         if delta_x is not None:
             delta_x = delta_x.to(self._device)
@@ -268,7 +267,7 @@ class SWAGModel(nn.Module):
                     delta = torch.normal(0, delta_x)
                     inp = inp + delta
                 elif cov_x is not None:
-                    delta = m.sample()
+                    delta = m.sample(sample_shape=torch.Size([x.shape[0]]))
                     inp = inp + delta
 
                 pred = self(inp)
@@ -279,8 +278,7 @@ class SWAGModel(nn.Module):
                 loss = self.get_logp_gmm(mu, y, sigma, alphas)
                 loss = loss.mean()
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.parameters(), 1.0)
-                #nn.utils.clip_grad_value_(self.parameters(), 10.0)
+                #nn.utils.clip_grad_norm_(self.parameters(), 1.0)
                 self.opt.step()
                 count += 1
                 losses.append(loss.item())

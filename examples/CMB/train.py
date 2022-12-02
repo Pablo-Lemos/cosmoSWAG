@@ -37,18 +37,17 @@ def train():
     model = SWAG_CMB(nin=nin, npars=npars, ncomps=1, cov_type="full", nHidden=128, nLayers=6)
 
     # Pre-training
-    model.train(x_train, y_train, cov_x=cov_x, lr=1e-4, num_epochs=10000, \
-                                                                num_workers=0,
-                 pretrain=True, patience=50)
+    model.train(x_train, y_train, cov_x=cov_x, lr=1e-3, num_epochs=10000,
+                num_workers=0, pretrain=True, patience=20, batch_size=100)
 
-    model.save("cmb_gmn_binned_pretrained_v3.pt", path=model_path)
+    model.save("cmb_gmn_binned_pretrained_10ksims.pt", path=model_path)
 
     # Swag training
     model.train(x_train, y_train, cov_x=cov_x, lr=1e-4, num_epochs=100,
                 num_workers=0,
                 pretrain=False)
 
-    model.save("cmb_gmn_binned_v3.pt", path=model_path)
+    model.save("cmb_gmn_binned_10ksims.pt", path=model_path)
 
 
 if __name__ == "__main__":
