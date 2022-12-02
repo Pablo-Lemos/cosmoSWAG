@@ -22,11 +22,11 @@ class SWAG_CMB(SWAGModel):
 
 
 def train():
-    data = read_binned_data()
+    data = read_binned_data(path="data/cmb_sims_10k/")
     data.read_truth(filename="planck_binned.txt")
     x_train, y_train, x_val, y_val = data.get_data()
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    path = os.path.join(dir_path, 'data/cmb_sims/cls_binned_cov.npy')
+    path = os.path.join(dir_path, 'data/cmb_sims_10k/cls_binned_cov.npy')
     model_path = os.path.join(dir_path, 'data/saved_models/')
     cov_x = np.load(path)
     cov_x = torch.tensor(cov_x, dtype = torch.float32)

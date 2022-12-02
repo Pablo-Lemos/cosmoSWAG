@@ -52,6 +52,7 @@ class SWAGModel(nn.Module):
     def aggregate_model(self):
         # """Aggregate parameters for SWA/SWAG"""
 
+        print("Aggregating model")
         cur_w = self.flatten()
         cur_w2 = cur_w ** 2
         with torch.no_grad():
@@ -232,10 +233,8 @@ class SWAGModel(nn.Module):
         loss = torch.logsumexp(arg, dim=1, keepdim=False)
         return loss
 
-    def train(self, x_train, y_train, delta_x=None, cov_x=None, lr=1e-3,
-                batch_size=32, num_workers=6, num_epochs=10000,
-              pretrain=False, weight_decay=0, patience=20, save_every=0,
-              save_name=None, save_path=None):
+    def train(self, x_train, y_train, delta_x=None, cov_x=None, lr=1e-3, batch_size=32, num_workers=6, num_epochs=10000,
+              pretrain=False, weight_decay=0, patience=20, save_every=0, save_name=None, save_path=None, clip_grad=0):
         """Train the model"""
 
         self.opt = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
@@ -248,8 +247,12 @@ class SWAGModel(nn.Module):
                 .MultivariateNormal(torch.zeros(cov_x.shape[0], device=self._device),
                                     covariance_matrix=cov_x)
 
-        dataset = data_utils.TensorDataset(x_train, y_train)
+        train_size = int(0.8 * len(x_train))
+
+        dataset = data_utils.TensorDataset(x_train[:train_size], y_train[:train_size])
         trainloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
+        x_valid = x_train[train_size:]
+        y_valid = y_train[train_size:]
         count = 0
 
         if pretrain:
@@ -278,32 +281,63 @@ class SWAGModel(nn.Module):
                 loss = self.get_logp_gmm(mu, y, sigma, alphas)
                 loss = loss.mean()
                 loss.backward()
-                #nn.utils.clip_grad_norm_(self.parameters(), 1.0)
+                if clip_grad > 0:
+                    nn.utils.clip_grad_norm_(self.parameters(), clip_grad)
                 self.opt.step()
                 count += 1
                 losses.append(loss.item())
 
+            if pretrain:
+                with torch.no_grad():
+                    inp_valid = x_valid.to(self._device)
+                    out_valid = y_valid.to(self._device)
+                    if delta_x is not None:
+                        delta = torch.normal(0, delta_x)
+                        inp = inp_valid + delta
+                    elif cov_x is not None:
+                        delta = m.sample(sample_shape=torch.Size([x_valid.shape[0]]))
+                        inp = inp_valid + delta
+
+                    pred = self(inp)
+                    mu_valid, sigma_valid, alphas_valid = self.separate_gmm(pred)
+                    alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
+                    y_valid = torch.reshape(out_valid, (-1, 1, self.npars))
+
+                    val_loss = self.get_logp_gmm(mu_valid, y_valid, sigma_valid, alphas_valid)
+                    val_loss = val_loss.mean()
+
+                    t.set_description(f"Loss = {val_loss :.5f}", refresh=True)
+                    if val_loss < best_loss:
+                        best_loss = val_loss
+                        num_steps_no_improv = 0
+                    else:
+                        num_steps_no_improv += 1
+                    if num_steps_no_improv == patience:
+                        break
+            else:
+                t.set_description(f"Loss = {np.average(losses) :.5f}", refresh=True)
+                self.aggregate_model()
+
             if ((save_every > 0) and (i%save_every == 0)): 
                 self.save(name=save_name, path=save_path) 
 
-            t.set_description(f"Loss = {np.average(losses) :.5f}", refresh=True)
             self.current_epoch = i
 
-            if pretrain:
-                if np.average(losses) < best_loss:
-                    best_loss = np.average(losses)
-                    num_steps_no_improv = 0
-                    best_state_dict = self.state_dict()
-                elif np.isfinite(np.average(losses)):
-                    num_steps_no_improv += 1
+            # if pretrain:
+            #     if np.average(losses) < best_loss:
+            #         best_loss = np.average(losses)
+            #         num_steps_no_improv = 0
+            #         best_state_dict = self.state_dict()
+            #     elif np.isfinite(np.average(losses)):
+            #         num_steps_no_improv += 1
+            #
+            #     if (num_steps_no_improv > patience):
+            #         print("Early stopping after ", num_steps_no_improv,
+            #               "epochs, and", count, "steps.")
+            #         self.load_state_dict(best_state_dict)
+            #         return None
 
-                if (num_steps_no_improv > patience):
-                    print("Early stopping after ", num_steps_no_improv,
-                          "epochs, and", count, "steps.")
-                    self.load_state_dict(best_state_dict)
-                    return None
-            else:
-                self.aggregate_model()
+        return best_loss
 
     def save(self, name=None, path=None):
         """ Save the model"""
@@ -335,10 +369,14 @@ class SWAGModel(nn.Module):
             return None 
 
         try:
-            model_state_dict, opt_state_dict, current_epoch ,self.w_avg, self.w2_avg, self.pre_D = torch.load(path)
+            model_state_dict, opt_state_dict, current_epoch, self.w_avg, self.w2_avg, self.pre_D = torch.load(path)
         except:
             model_state_dict, opt_state_dict, current_epoch ,self.w_avg, \
             self.w2_avg, self.pre_D = torch.load(path, map_location=torch.device('cpu'))
+
+        print("Model loaded from: " + path)
+        print("Current epoch: ", current_epoch)
+        print("Current weight average: ", self.w_avg)
 
         self.load_state_dict(model_state_dict)
         if self.opt is None:
