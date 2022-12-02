@@ -51,8 +51,6 @@ class SWAGModel(nn.Module):
 
     def aggregate_model(self):
         # """Aggregate parameters for SWA/SWAG"""
-
-        print("Aggregating model")
         cur_w = self.flatten()
         cur_w2 = cur_w ** 2
         with torch.no_grad():
@@ -234,10 +232,14 @@ class SWAGModel(nn.Module):
         return loss
 
     def train(self, x_train, y_train, delta_x=None, cov_x=None, lr=1e-3, batch_size=32, num_workers=6, num_epochs=10000,
-              pretrain=False, weight_decay=0, patience=20, save_every=0, save_name=None, save_path=None, clip_grad=0):
+              pretrain=False, weight_decay=0, patience=20, save_every=0, save_name=None, save_path=None, clip_grad=0,
+              optimizer='adam', scheduler='none'):
         """Train the model"""
 
-        self.opt = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
+        if optimizer == 'adam':
+            self.opt = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
+        elif optimizer == 'sgd':
+            self.opt = torch.optim.SGD(self.parameters(), lr=lr, weight_decay=weight_decay)
 
         if delta_x is not None:
             delta_x = delta_x.to(self._device)
@@ -254,6 +256,15 @@ class SWAGModel(nn.Module):
         x_valid = x_train[train_size:]
         y_valid = y_train[train_size:]
         count = 0
+
+        if scheduler == 'none':
+            self.scheduler = None
+        elif scheduler == 'plateau':
+            self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.opt, patience=patience)
+        elif scheduler == 'step':
+            self.scheduler = torch.optim.lr_scheduler.StepLR(self.opt, step_size=patience)
+        elif scheduler == 'ocr':
+            self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.opt, max_lr=lr, steps_per_epoch=len(trainloader), epochs=num_epochs)
 
         if pretrain:
             num_steps_no_improv = 0
@@ -284,6 +295,8 @@ class SWAGModel(nn.Module):
                 if clip_grad > 0:
                     nn.utils.clip_grad_norm_(self.parameters(), clip_grad)
                 self.opt.step()
+                if self.scheduler is not None:
+                    self.scheduler.step()
                 count += 1
                 losses.append(loss.item())
 
