@@ -113,8 +113,8 @@ class SWAGModel(nn.Module):
             D = self.pre_D - avg_w[:, None]  # [d, K]
             d = avg_w.shape[0]
             K = self.K
-            z_1 = torch.randn((1, d))#, device=self.device)
-            z_2 = torch.randn((K, 1))#, device=self.device)
+            z_1 = torch.randn((1, d), dtype=torch.float64)#, device=self.device)
+            z_2 = torch.randn((K, 1), dtype=torch.float64)#, device=self.device)
 
             #sigma = torch.abs(torch.diag(avg_w2 - avg_w ** 2))
             #w = avg_w[None] + scale * (1.0 / np.sqrt(2.0)) * z_1 @ sigma ** 0.5
@@ -210,22 +210,41 @@ class SWAGModel(nn.Module):
         # sigma is log_sigma_squared for diagonal cov, invcov for full
         return mu, sigma, alphas
 
-    def predict(self, x):
-        pred = self(x)
-        mu, invcov = self.separate_mu_cov(pred)
-        return mu, invcov
+    # def predict(self, x):
+    #     pred = self(x)
+    #     mu, invcov = self.separate_mu_cov(pred)
+    #     return mu, invcov
 
     def get_logp_gmm(self, mu, y, sigma, alphas):
         if self.cov_type is None:
+            assert mu.shape == y.shape, "mu and y must have the same shape"
             loss = (mu - y) ** 2
+            return loss[:, 0]
         if self.cov_type == "diag":
             loss = (mu - y) ** 2 / 2 / torch.exp(sigma) + sigma / 2
         else:
             alphas = alphas[:,:,0]
             chi2 = torch.einsum('...j, ...jk, ...k -> ...', mu - y,
                                 sigma, mu - y)
-            loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(sigma),
-                                                         min=1e-25, max=1e25))
+            loss = chi2 / 2 - 0.5 * torch.logdet(sigma) + np.log(2 * np.pi) * self.npars / 2
+
+            # loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(sigma),
+            #                                              min=1e-25, max=1e25)) + np.log(2*np.pi) * self.npars / 2
+            while torch.isnan(loss).any():
+                print("NAN DETECTED")
+                print(sigma[torch.isnan(loss)])
+                loss[torch.isnan(loss)] = 100
+            # if torch.min(chi2) < 0:
+            #     print("WARNING: Chi2 is negative")
+            #     return 1e3*torch.ones_like(loss)
+            # if torch.min(torch.det(sigma)) < 1e-25:
+            #     print("WARNING: Determinant of covariance matrix is too small")
+            # if torch.max(torch.det(sigma)) > 1e25:
+            #     print("WARNING: Determinant of covariance matrix is too large")
+            # This agrees with the loss function the way I am doing it
+            # m = torch.distributions.MultivariateNormal(loc=mu, precision_matrix=sigma)
+            # m.log_prob(y)
+
 
         arg = loss + torch.log(alphas)
         loss = torch.logsumexp(arg, dim=1, keepdim=False)
@@ -246,7 +265,7 @@ class SWAGModel(nn.Module):
         elif cov_x is not None:
             cov_x = cov_x.to(self._device)
             m = torch.distributions.multivariate_normal \
-                .MultivariateNormal(torch.zeros(cov_x.shape[0], device=self._device),
+                .MultivariateNormal(torch.zeros(cov_x.shape[0], device=self._device, dtype=torch.float64),
                                     covariance_matrix=cov_x)
 
         train_size = int(0.8 * len(x_train))
@@ -260,7 +279,7 @@ class SWAGModel(nn.Module):
         if scheduler == 'none':
             self.scheduler = None
         elif scheduler == 'plateau':
-            self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.opt, patience=patience)
+            self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.opt, patience=patience, mode='min')
         elif scheduler == 'step':
             self.scheduler = torch.optim.lr_scheduler.StepLR(self.opt, step_size=patience)
         elif scheduler == 'ocr':
@@ -290,36 +309,41 @@ class SWAGModel(nn.Module):
                 y = torch.reshape(out, (-1, 1, self.npars))
 
                 loss = self.get_logp_gmm(mu, y, sigma, alphas)
-                loss = loss.mean()
+                loss = torch.sum(loss, dim=-1)
+                loss = torch.mean(loss)
                 loss.backward()
                 if clip_grad > 0:
                     nn.utils.clip_grad_norm_(self.parameters(), clip_grad)
                 self.opt.step()
-                if self.scheduler is not None:
+                if scheduler in ['step', 'ocr']:
                     self.scheduler.step()
                 count += 1
                 losses.append(loss.item())
 
-            if pretrain:
-                with torch.no_grad():
-                    inp_valid = x_valid.to(self._device)
-                    out_valid = y_valid.to(self._device)
-                    if delta_x is not None:
-                        delta = torch.normal(0, delta_x)
-                        inp = inp_valid + delta
-                    elif cov_x is not None:
-                        delta = m.sample(sample_shape=torch.Size([x_valid.shape[0]]))
-                        inp = inp_valid + delta
+            with torch.no_grad():
+                inp_valid = x_valid.to(self._device)
+                out_valid = y_valid.to(self._device)
+                if delta_x is not None:
+                    delta = torch.normal(0, delta_x)
+                    inp_valid = inp_valid + delta
+                elif cov_x is not None:
+                    delta = m.sample(sample_shape=torch.Size([x_valid.shape[0]]))
+                    inp_valid = inp_valid + delta
 
-                    pred = self(inp)
-                    mu_valid, sigma_valid, alphas_valid = self.separate_gmm(pred)
-                    alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
-                    y_valid = torch.reshape(out_valid, (-1, 1, self.npars))
+                pred = self(inp_valid)
+                mu_valid, sigma_valid, alphas_valid = self.separate_gmm(pred)
+                alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
+                y_valid = torch.reshape(out_valid, (-1, 1, self.npars))
 
-                    val_loss = self.get_logp_gmm(mu_valid, y_valid, sigma_valid, alphas_valid)
-                    val_loss = val_loss.mean()
+                val_loss = self.get_logp_gmm(mu_valid, y_valid, sigma_valid, alphas_valid)
+                val_loss = val_loss.mean()
 
-                    t.set_description(f"Loss = {val_loss :.5f}", refresh=True)
+                if scheduler == 'plateau':
+                    self.scheduler.step(val_loss)
+
+                t.set_description(f"Loss = {val_loss :.5f}", refresh=True)
+
+                if pretrain:
                     if val_loss < best_loss:
                         best_loss = val_loss
                         num_steps_no_improv = 0
@@ -327,9 +351,8 @@ class SWAGModel(nn.Module):
                         num_steps_no_improv += 1
                     if num_steps_no_improv == patience:
                         break
-            else:
-                t.set_description(f"Loss = {np.average(losses) :.5f}", refresh=True)
-                self.aggregate_model()
+                else:
+                    self.aggregate_model()
 
             if ((save_every > 0) and (i%save_every == 0)): 
                 self.save(name=save_name, path=save_path) 
@@ -350,7 +373,7 @@ class SWAGModel(nn.Module):
             #         self.load_state_dict(best_state_dict)
             #         return None
 
-        return best_loss
+        return best_loss if pretrain else None
 
     def save(self, name=None, path=None):
         """ Save the model"""
@@ -392,8 +415,8 @@ class SWAGModel(nn.Module):
         print("Current weight average: ", self.w_avg)
 
         self.load_state_dict(model_state_dict)
-        if self.opt is None:
-            self.opt = torch.optim.Adam(self.parameters())
-        self.opt.load_state_dict(opt_state_dict)
+        # if self.opt is None:
+        #     self.opt = torch.optim.Adam(self.parameters())
+        # self.opt.load_state_dict(opt_state_dict)
 
 

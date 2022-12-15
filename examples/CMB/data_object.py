@@ -170,10 +170,10 @@ def bin_cls_to(cls, bin_centers):
 def read_data(path=None, normalize=True):
     if path is None:
         dir_path = os.path.dirname(os.path.realpath(__file__))
-        path = os.path.join(dir_path, 'data/')
+        path = os.path.join(dir_path, 'data/cmb_sims')
 
-    cls = np.load(os.path.join(path, 'cmb_sims/cls.npy'))
-    params = np.load(os.path.join(path, 'cmb_sims/params.npy'))
+    cls = np.load(os.path.join(path, 'cls.npy'))
+    params = np.load(os.path.join(path, 'params.npy'))
 
     data = CMBDataObject(cls, params, norm_data=normalize)
     #data.read_truth()
@@ -184,10 +184,10 @@ def read_data(path=None, normalize=True):
 def read_binned_data(path=None, normalize=True):
     if path is None:
         dir_path = os.path.dirname(os.path.realpath(__file__))
-        path = os.path.join(dir_path, 'data/')
+        path = os.path.join(dir_path, 'data/cmb_sims')
 
-    cls = np.load(os.path.join(path, 'cmb_sims/cls_binned.npy'))
-    params = np.load(os.path.join(path, 'cmb_sims/params.npy'))
+    cls = np.load(os.path.join(path, 'cls_binned.npy'))
+    params = np.load(os.path.join(path, 'params.npy'))
 
     data = CMBDataObject(cls, params, norm_data=normalize)
     #data.read_truth()

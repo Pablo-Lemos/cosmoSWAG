@@ -4,9 +4,9 @@ import torch
 def make_triangular(x, size, device = None):
     assert size * (size + 1) // 2 == x.shape[1], 'Wrong size'
     if device is not None:
-        mat = torch.zeros([x.shape[0], size, size], device=device)
+        mat = torch.zeros([x.shape[0], size, size], device=device, dtype=torch.float64)
     else:
-        mat = torch.zeros([x.shape[0], size, size])
+        mat = torch.zeros([x.shape[0], size, size], dtype=torch.float64)
     j = 0
     n = size
     for i in range(size):
@@ -21,7 +21,7 @@ def to_tensor(x):
         return x
     else:
         try:
-            x = torch.tensor(x, dtype=torch.float32)
+            x = torch.tensor(x, dtype=torch.float64)
         except:
             raise TypeError('Could not convert to tensor.')
         return x

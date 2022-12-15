@@ -22,11 +22,11 @@ class SWAG_CMB(SWAGModel):
 
 
 def train():
-    data = read_binned_data(path="data/cmb_sims_10k/")
+    data = read_binned_data(path="data/cmb_sims/")
     data.read_truth(filename="planck_binned.txt")
     x_train, y_train, x_val, y_val = data.get_data()
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    path = os.path.join(dir_path, 'data/cmb_sims_10k/cls_binned_cov.npy')
+    path = os.path.join(dir_path, 'data/cmb_sims/cls_binned_cov.npy')
     model_path = os.path.join(dir_path, 'data/saved_models/')
     cov_x = np.load(path)
     cov_x = torch.tensor(cov_x, dtype = torch.float32)
@@ -34,20 +34,21 @@ def train():
 
     nin = x_train.shape[1]
     npars = y_train.shape[1]
-    model = SWAG_CMB(nin=nin, npars=npars, ncomps=1, cov_type="full", nHidden=128, nLayers=6)
+    model = SWAG_CMB(nin=nin, npars=npars, ncomps=1, cov_type="full", nHidden=256, nLayers=7)
 
     # Pre-training
-    model.train(x_train, y_train, cov_x=cov_x, lr=1e-3, num_epochs=10000,
-                num_workers=0, pretrain=True, patience=20, batch_size=100)
+    model.train(x_train[:18000], y_train[:18000], cov_x=cov_x, lr=1e-4, num_epochs=10000,
+                num_workers=0, pretrain=True, patience=50, batch_size=200)
 
-    model.save("cmb_gmn_binned_pretrained_10ksims.pt", path=model_path)
+    model.save("cmb_gmn_binned_pretrained_20ksims.pt", path=model_path)
 
     # Swag training
-    model.train(x_train, y_train, cov_x=cov_x, lr=1e-4, num_epochs=100,
+    model.train(x_train[:18000], y_train[:18000], cov_x=cov_x, lr=1e-4, num_epochs=100,
                 num_workers=0,
-                pretrain=False)
+                pretrain=False,
+                batch_size=200)
 
-    model.save("cmb_gmn_binned_10ksims.pt", path=model_path)
+    model.save("cmb_gmn_binned_20ksims.pt", path=model_path)
 
 
 if __name__ == "__main__":
