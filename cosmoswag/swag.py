@@ -265,6 +265,8 @@ class SWAGModel(nn.Module):
             print("Validation fraction not specified, using default (0.2)")
             valid_fr = 0.2
 
+        use_loaders = (train_loader is not None) and (valid_loader is not None)
+
         if optimizer == 'adam':
             self.opt = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
         elif optimizer == 'sgd':
@@ -278,7 +280,7 @@ class SWAGModel(nn.Module):
                 .MultivariateNormal(torch.zeros(cov_x.shape[0], device=self._device, dtype=torch.float64),
                                     covariance_matrix=cov_x)
 
-        if valid_fr is not None:
+        if (valid_fr is not None) and not use_loaders:
             train_size = int((1 - valid_fr) * len(x_train))
             x_valid = x_train[train_size:]
             y_valid = y_train[train_size:]
