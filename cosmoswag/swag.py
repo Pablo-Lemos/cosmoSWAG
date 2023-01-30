@@ -12,10 +12,10 @@ import torch.utils.data as data_utils
 import os
 from .utils import soft_clamp, make_triangular, logsumexp
 
+
 class SWAGModel(nn.Module):
 
     def __init__(self, nin, npars, ncomps=1, cov_type=None, device=None):
-        #super(self.__class__, self).__init__()
         nn.Module.__init__(self)
 
         self.w_avg = None
@@ -271,9 +271,11 @@ class SWAGModel(nn.Module):
         train_size = int(0.8 * len(x_train))
 
         dataset = data_utils.TensorDataset(x_train[:train_size], y_train[:train_size])
-        trainloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
+        train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
         x_valid = x_train[train_size:]
         y_valid = y_train[train_size:]
+        valid_dataset = data_utils.TensorDataset(x_valid, y_valid)
+        valid_loader = DataLoader(valid_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
         count = 0
 
         if scheduler == 'none':
@@ -283,7 +285,8 @@ class SWAGModel(nn.Module):
         elif scheduler == 'step':
             self.scheduler = torch.optim.lr_scheduler.StepLR(self.opt, step_size=patience)
         elif scheduler == 'ocr':
-            self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.opt, max_lr=lr, steps_per_epoch=len(trainloader), epochs=num_epochs)
+            self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.opt, max_lr=lr, steps_per_epoch=len(train_loader),
+                                                                 epochs=num_epochs)
 
         if pretrain:
             num_steps_no_improv = 0
@@ -292,7 +295,7 @@ class SWAGModel(nn.Module):
         t = trange(num_epochs, desc='loss', leave=True)
         for i in t:
             losses = []
-            for x, y in trainloader:
+            for x, y in train_loader:
                 self.opt.zero_grad()
                 inp = x.to(self._device)
                 out = y.to(self._device)
@@ -321,27 +324,31 @@ class SWAGModel(nn.Module):
                 losses.append(loss.item())
 
             with torch.no_grad():
-                inp_valid = x_valid.to(self._device)
-                out_valid = y_valid.to(self._device)
-                if delta_x is not None:
-                    delta = torch.normal(0, delta_x)
-                    inp_valid = inp_valid + delta
-                elif cov_x is not None:
-                    delta = m.sample(sample_shape=torch.Size([x_valid.shape[0]]))
-                    inp_valid = inp_valid + delta
+                val_losses = []
+                for _x, _y in valid_loader:
+                    inp_valid = _x.to(self._device)
+                    out_valid = _y.to(self._device)
+                    if delta_x is not None:
+                        delta = torch.normal(0, delta_x)
+                        inp_valid = inp_valid + delta
+                    elif cov_x is not None:
+                        delta = m.sample(sample_shape=torch.Size([_x.shape[0]]))
+                        inp_valid = inp_valid + delta
 
-                pred = self(inp_valid)
-                mu_valid, sigma_valid, alphas_valid = self.separate_gmm(pred)
-                alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
-                y_valid = torch.reshape(out_valid, (-1, 1, self.npars))
+                    pred = self(inp_valid)
+                    mu_valid, sigma_valid, alphas_valid = self.separate_gmm(pred)
+                    alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
+                    y_valid = torch.reshape(out_valid, (-1, 1, self.npars))
 
-                val_loss = self.get_logp_gmm(mu_valid, y_valid, sigma_valid, alphas_valid)
-                val_loss = val_loss.mean()
+                    val_loss = self.get_logp_gmm(mu_valid, y_valid, sigma_valid, alphas_valid)
+                    val_loss = val_loss.mean()
 
-                if scheduler == 'plateau':
-                    self.scheduler.step(val_loss)
+                    if scheduler == 'plateau':
+                        self.scheduler.step(val_loss)
 
-                t.set_description(f"Loss = {val_loss :.5f}", refresh=True)
+                    val_losses.append(val_loss.item())
+
+                t.set_description(f"Loss = {np.mean(val_losses) :.5f}", refresh=True)
 
                 if pretrain:
                     if val_loss < best_loss:
@@ -358,20 +365,6 @@ class SWAGModel(nn.Module):
                 self.save(name=save_name, path=save_path) 
 
             self.current_epoch = i
-
-            # if pretrain:
-            #     if np.average(losses) < best_loss:
-            #         best_loss = np.average(losses)
-            #         num_steps_no_improv = 0
-            #         best_state_dict = self.state_dict()
-            #     elif np.isfinite(np.average(losses)):
-            #         num_steps_no_improv += 1
-            #
-            #     if (num_steps_no_improv > patience):
-            #         print("Early stopping after ", num_steps_no_improv,
-            #               "epochs, and", count, "steps.")
-            #         self.load_state_dict(best_state_dict)
-            #         return None
 
         return best_loss if pretrain else None
 
