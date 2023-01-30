@@ -280,7 +280,7 @@ class SWAGModel(nn.Module):
                 .MultivariateNormal(torch.zeros(cov_x.shape[0], device=self._device, dtype=torch.float64),
                                     covariance_matrix=cov_x)
 
-        if (valid_fr is not None) and not use_loaders:
+        if (valid_fr is not None) and (not use_loaders):
             train_size = int((1 - valid_fr) * len(x_train))
             x_valid = x_train[train_size:]
             y_valid = y_train[train_size:]
