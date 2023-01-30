@@ -250,10 +250,20 @@ class SWAGModel(nn.Module):
         loss = torch.logsumexp(arg, dim=1, keepdim=False)
         return loss
 
-    def train(self, x_train, y_train, delta_x=None, cov_x=None, lr=1e-3, batch_size=32, num_workers=6, num_epochs=10000,
+    def train(self, x_train=None, y_train=None, x_valid=None, y_valid=None, valid_fr=None, train_loader=None,
+              valid_loader=None, delta_x=None, cov_x=None, lr=1e-3, batch_size=32, num_workers=6, num_epochs=10000,
               pretrain=False, weight_decay=0, patience=20, save_every=0, save_name=None, save_path=None, clip_grad=0,
               optimizer='adam', scheduler='none'):
-        """Train the model"""
+        """Train the model
+        """
+
+        # TODO: Add more assert statements here
+        if (valid_fr is not None) and ((x_valid is not None) or (y_valid is not None)):
+            raise "Specified valid_fr, and either x_valid or y_valid. Use one or the other"
+
+        if (valid_fr is None) and ((x_valid is None) or (y_valid is None)):
+            print("Validation fraction not specified, using default (0.2)")
+            valid_fr = 0.2
 
         if optimizer == 'adam':
             self.opt = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
@@ -268,15 +278,21 @@ class SWAGModel(nn.Module):
                 .MultivariateNormal(torch.zeros(cov_x.shape[0], device=self._device, dtype=torch.float64),
                                     covariance_matrix=cov_x)
 
-        train_size = int(0.8 * len(x_train))
+        if valid_fr is not None:
+            train_size = int((1 - valid_fr) * len(x_train))
+            x_valid = x_train[train_size:]
+            y_valid = y_train[train_size:]
+            x_train = x_train[:train_size]
+            y_train = y_train[:train_size]
 
-        dataset = data_utils.TensorDataset(x_train[:train_size], y_train[:train_size])
-        train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
-        x_valid = x_train[train_size:]
-        y_valid = y_train[train_size:]
-        valid_dataset = data_utils.TensorDataset(x_valid, y_valid)
-        valid_loader = DataLoader(valid_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
-        count = 0
+        if train_loader is None:
+            dataset = data_utils.TensorDataset(x_train, y_train)
+            train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
+
+        if valid_loader is None:
+            valid_dataset = data_utils.TensorDataset(x_valid, y_valid)
+            valid_loader = DataLoader(valid_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
+            count = 0
 
         if scheduler == 'none':
             self.scheduler = None
