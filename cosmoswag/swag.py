@@ -92,6 +92,8 @@ class SWAGModel(nn.Module):
             old_p = cur_state_dict[key]
             size = old_p.numel()
             shape = old_p.shape
+            if size == 1: 
+                shape = [1]
             new_p = p_vec[i:i + size].reshape(*shape)
             new_state_dict[key] = new_p
             i += size
@@ -113,13 +115,14 @@ class SWAGModel(nn.Module):
             D = self.pre_D - avg_w[:, None]  # [d, K]
             d = avg_w.shape[0]
             K = self.K
-            z_1 = torch.randn((1, d), dtype=torch.float64)#, device=self.device)
-            z_2 = torch.randn((K, 1), dtype=torch.float64)#, device=self.device)
+            z_1 = torch.randn((1, d), dtype=torch.float64, device=self._device)
+            z_2 = torch.randn((K, 1), dtype=torch.float64, device=self._device)
 
             #sigma = torch.abs(torch.diag(avg_w2 - avg_w ** 2))
             #w = avg_w[None] + scale * (1.0 / np.sqrt(2.0)) * z_1 @ sigma ** 0.5
             w = avg_w[None] + scale * (1.0 / np.sqrt(2.0)) * z_1 * torch.abs(
                 avg_w2 - avg_w ** 2) ** 0.5
+            D = torch.as_tensor(D, dtype=torch.float64, device=self._device)
             w += scale * (D @ z_2).T / np.sqrt(2 * (K - 1))
             w = w[0]
 
@@ -219,6 +222,7 @@ class SWAGModel(nn.Module):
         if self.cov_type is None:
             assert mu.shape == y.shape, "mu and y must have the same shape"
             loss = (mu - y) ** 2
+            print(mu.shape, loss.shape)
             return loss[:, 0]
         if self.cov_type == "diag":
             loss = (mu - y) ** 2 / 2 / torch.exp(sigma) + sigma / 2
@@ -294,7 +298,6 @@ class SWAGModel(nn.Module):
         if valid_loader is None:
             valid_dataset = data_utils.TensorDataset(x_valid, y_valid)
             valid_loader = DataLoader(valid_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
-            count = 0
 
         if scheduler == 'none':
             self.scheduler = None
@@ -309,6 +312,8 @@ class SWAGModel(nn.Module):
         if pretrain:
             num_steps_no_improv = 0
             best_loss = np.infty
+        
+        count = 0
 
         t = trange(num_epochs, desc='loss', leave=True)
         for i in t:
