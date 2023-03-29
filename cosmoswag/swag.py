@@ -185,6 +185,9 @@ class SWAGModel(nn.Module):
         return mu, log_sigma_squared
 
     def separate_gmm(self, pred):
+        if self.cov_type is None:
+            return pred, None, None
+
         mu = pred[:, :int(self.npars*self.ncomps)]
         ilow = int(self.npars * self.ncomps)
         if self.cov_type == "diag":
@@ -220,10 +223,10 @@ class SWAGModel(nn.Module):
 
     def get_logp_gmm(self, mu, y, sigma, alphas):
         if self.cov_type is None:
-            assert mu.shape == y.shape, "mu and y must have the same shape"
-            loss = (mu - y) ** 2
-            print(mu.shape, loss.shape)
-            return loss[:, 0]
+            assert mu.shape == y.shape, f"mu and y must have the same shape, but mu is {mu.shape} and y is {y.shape}"
+            return torch.sqrt(((y - mu) ** 2).sum())
+            #loss = (mu - y) ** 2
+            #return loss#[:, 0]
         if self.cov_type == "diag":
             loss = (mu - y) ** 2 / 2 / torch.exp(sigma) + sigma / 2
         else:
@@ -232,22 +235,10 @@ class SWAGModel(nn.Module):
                                 sigma, mu - y)
             loss = chi2 / 2 - 0.5 * torch.logdet(sigma) + np.log(2 * np.pi) * self.npars / 2
 
-            # loss = chi2 / 2 - 0.5 * torch.log(torch.clip(torch.det(sigma),
-            #                                              min=1e-25, max=1e25)) + np.log(2*np.pi) * self.npars / 2
             while torch.isnan(loss).any():
                 print("NAN DETECTED")
                 print(sigma[torch.isnan(loss)])
-                loss[torch.isnan(loss)] = 100
-            # if torch.min(chi2) < 0:
-            #     print("WARNING: Chi2 is negative")
-            #     return 1e3*torch.ones_like(loss)
-            # if torch.min(torch.det(sigma)) < 1e-25:
-            #     print("WARNING: Determinant of covariance matrix is too small")
-            # if torch.max(torch.det(sigma)) > 1e25:
-            #     print("WARNING: Determinant of covariance matrix is too large")
-            # This agrees with the loss function the way I am doing it
-            # m = torch.distributions.MultivariateNormal(loc=mu, precision_matrix=sigma)
-            # m.log_prob(y)
+
 
 
         arg = loss + torch.log(alphas)
@@ -265,7 +256,7 @@ class SWAGModel(nn.Module):
         if (valid_fr is not None) and ((x_valid is not None) or (y_valid is not None)):
             raise "Specified valid_fr, and either x_valid or y_valid. Use one or the other"
 
-        if (valid_fr is None) and ((x_valid is None) or (y_valid is None)):
+        if (valid_fr is None) and (valid_loader is None) and ((x_valid is None) or (y_valid is None)):
             print("Validation fraction not specified, using default (0.2)")
             valid_fr = 0.2
 
@@ -331,12 +322,17 @@ class SWAGModel(nn.Module):
 
                 pred = self(inp)
                 mu, sigma, alphas = self.separate_gmm(pred)
-                alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
-                y = torch.reshape(out, (-1, 1, self.npars))
 
-                loss = self.get_logp_gmm(mu, y, sigma, alphas)
-                loss = torch.sum(loss, dim=-1)
-                loss = torch.mean(loss)
+                if self.cov_type is None:
+                    loss = self.get_logp_gmm(mu, y, sigma, alphas)
+                else:
+                    alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
+                    y = torch.reshape(out, (-1, 1, self.npars))
+
+                    loss = self.get_logp_gmm(mu, y, sigma, alphas)
+                    loss = torch.sum(loss, dim=-1)
+                    loss = torch.mean(loss)
+
                 loss.backward()
                 if clip_grad > 0:
                     nn.utils.clip_grad_norm_(self.parameters(), clip_grad)
@@ -360,11 +356,15 @@ class SWAGModel(nn.Module):
 
                     pred = self(inp_valid)
                     mu_valid, sigma_valid, alphas_valid = self.separate_gmm(pred)
-                    alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
-                    y_valid = torch.reshape(out_valid, (-1, 1, self.npars))
 
-                    val_loss = self.get_logp_gmm(mu_valid, y_valid, sigma_valid, alphas_valid)
-                    val_loss = val_loss.mean()
+                    if self.cov_type is None:
+                        val_loss = self.get_logp_gmm(mu_valid, out_valid, sigma_valid, alphas_valid)
+                    else:
+                        alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
+                        y_valid = torch.reshape(out_valid, (-1, 1, self.npars))
+
+                        val_loss = self.get_logp_gmm(mu_valid, y_valid, sigma_valid, alphas_valid)
+                        val_loss = val_loss.mean()
 
                     if scheduler == 'plateau':
                         self.scheduler.step(val_loss)

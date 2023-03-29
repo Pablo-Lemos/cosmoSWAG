@@ -8,57 +8,8 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.sampler import SubsetRandomSampler
 import gc
 
-Nside=128
+Nside=32
 seed=1
-
-class SWAG_simbig(SWAGModel):
-    def __init__(self, npars, ncomps=1, cov_type="diag", kernel=3, device=None):
-        SWAGModel.__init__(self, 0, npars, ncomps, cov_type, device)
-
-        self.flipper = nn.Sequential(
-            torchvision.transforms.RandomHorizontalFlip(p=0.5),
-            torchvision.transforms.RandomVerticalFlip(p=0.5)
-        )
-
-        self.conv = nn.Sequential(
-            nn.Conv3d(1, 8, kernel, padding = 'same'),
-            nn.ReLU(),
-            nn.Conv3d(8, 16, kernel, padding = 'same'),
-            nn.ReLU(),
-            nn.MaxPool3d(4),
-            nn.Conv3d(16, 16, kernel, padding = 'same'),
-            nn.ReLU(),
-            nn.Conv3d(16, 32, kernel, padding = 'same'),
-            nn.ReLU(),
-            nn.MaxPool3d(4),
-            nn.Conv3d(32, 32, kernel, padding = 'same'),
-            nn.ReLU(),
-            nn.Conv3d(32, 64, kernel, padding = 'same'),
-            nn.ReLU(),
-            nn.MaxPool3d(2),
-        )
-
-        self.batchnorm = nn.InstanceNorm3d(64)
-
-        self.out = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(4096, 128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, self.nout),
-        )
-
-    def forward(self, x):
-        x = self.flipper(x)
-        x = self.conv(x)
-        x = self.batchnorm(x)
-        return self.out(x)
 
 
 class CNNModel(SWAGModel):
@@ -70,8 +21,6 @@ class CNNModel(SWAGModel):
             torchvision.transforms.RandomHorizontalFlip(p=0.5),
             torchvision.transforms.RandomVerticalFlip(p=0.5)
         )
-
-        nPools = 5
 
         curr_hidden = nhidden_cnn
 
@@ -107,7 +56,6 @@ class CNNModel(SWAGModel):
         self.out = nn.Sequential(*self.out)
 
     def forward(self, x):
-        #print(type(x), x.shape)
         x = self.flipper(x)
         x = self.conv(x)
         return self.out(x)
@@ -116,38 +64,8 @@ class CNNModel(SWAGModel):
 class CosmoData(Dataset):
     def __init__(self):
         super().__init__()
-        y_train = np.loadtxt(os.path.join(dat_dir, 'simbig.cmass_sgc.theta.dat'), skiprows=1)
-        self.x_train = np.load(
-                os.path.join(dat_dir, f'simbig.cmass_sgc.mesh.nside{Nside}.npy'),
-                mmap_mode='r+'
-                )
-
-        #self.x_avg = np.load(os.path.join(dat_dir, f'train_inp_avg.nside{Nside}.npy'), mmap_mode='r+')[0]
-        #self.x_std = np.load(os.path.join(dat_dir, f'train_inp_std.nside{Nside}.npy'), mmap_mode='r+')[0]
-        self.x_avg = np.mean(self.x_train, axis=0, keepdims=False)
-        self.x_std = np.std(self.x_train, axis=0, keepdims=False)
-        y_train_new = np.copy(y_train)
-        #y_train_new[:,1] = y_train[:,0]/y_train[:,1]
-        #y_train_new[:,2] = y_train[:,0]*y_train[:,2]
-        #y_train_new[:,4] = y_train[:,4]*y_train[:,0]**0.5 
-        y_max = np.max(y_train_new, axis=0, keepdims=True)
-        y_min = np.min(y_train_new, axis=0, keepdims=True)
-        self.y_train = (y_train_new - y_min)/(y_max - y_min)
-
-    def __len__(self):
-        return len(self.y_train)
-
-    def __getitem__(self, idx):
-        x = self.x_train[idx]
-        y = self.y_train[idx, :5]
-        x = (x - self.x_avg)/(self.x_std + 1e-20)
-        return x, y
-
-
-class CosmoData(Dataset):
-    def __init__(self):
-        super().__init__()
-        dat_dir = '/home/pl7508/scratch/simbig/mesh'
+        #dat_dir = '/home/pl7508/scratch/simbig/mesh'
+        dat_dir = '/Users/pablo/Dropbox/data/Simbig/OLD'
         y_train = np.loadtxt(os.path.join(dat_dir, 'simbig.cmass_sgc.theta.dat'), skiprows=1)
         y_train = y_train[:, :5]
         self.x_train = np.load(
@@ -180,18 +98,6 @@ class CosmoData(Dataset):
 
 
 def train():
-    #path = '/home/pl7508/scratch/simbig/mesh/'
-    #x_train = torch.load(os.path.join(path, "train_inp.pt"))
-    #y_train = torch.load(os.path.join(path, "train_out.pt"))
-    #x_val = torch.load(os.path.join(path, "val_inp.pt"))
-    #y_val = torch.load(os.path.join(path, "val_out.pt"))
-    #low, _ = torch.min(y_train, dim=0, keepdim = True)
-    #high, _ = torch.max(y_train, dim=0, keepdim = True)
-    #print('Normalizing')
-    #print('Low =', low)
-    #print('High =', high)
-    #y_train = (y_train - low) / (high - low)
-    #y_val = (y_val - low) / (high - low)
 
     dataset = CosmoData()
 
