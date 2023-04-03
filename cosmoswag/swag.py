@@ -324,7 +324,7 @@ class SWAGModel(nn.Module):
                 mu, sigma, alphas = self.separate_gmm(pred)
 
                 if self.cov_type is None:
-                    loss = self.get_logp_gmm(mu, y, sigma, alphas)
+                    loss = self.get_logp_gmm(mu, out, sigma, alphas)
                 else:
                     alphas = torch.reshape(alphas, (-1, self.ncomps, 1))
                     y = torch.reshape(out, (-1, 1, self.npars))
