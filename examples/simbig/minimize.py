@@ -9,7 +9,8 @@ from torch.utils.data.sampler import SubsetRandomSampler
 import gc
 
 Nside=128
-Name='final_v1'
+off=0
+Name=f'final_off{off}'
 seed=1
 
 class CNNModel(SWAGModel):
@@ -116,7 +117,8 @@ def train():
                                                 sampler=valid_sampler)
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    model_path = os.path.join(dir_path, '/Users/pablo/Desktop')
+    model_path = os.path.join(dir_path, 'data/saved_models/')
+    #model_path = os.path.join(dir_path, '/Users/pablo/Desktop')
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = CNNModel(
@@ -127,17 +129,18 @@ def train():
             Nside=Nside, 
             nhidden_cnn=14,
             nlayers_cnn=5,
-            dropout_cnn=0.15,
+            #nlayers_cnn=3,
+            dropout_cnn=0, #.15/off,
             nhidden_out=256,
             nlayers_out=3,
-            dropout_out=0.4,
+            dropout_out=0, #.4/off,
             device=device).cuda()
     #model.load(f"mesh_minimize_nside{Nside}_pretrained.pt", path=model_path)
 
     # Pre-training
     model.train(train_loader=train_loader, valid_loader=valid_loader, lr=1e-2,
                 num_epochs=1000, num_workers=4,
-                pretrain=True, patience=20, save_every=1000, weight_decay=0.0275,
+                pretrain=True, patience=50, save_every=1000, #weight_decay=0.0275,
                 optimizer='sgd', scheduler='ocr',
                 save_name="mesh_minimize_nside{Nside}_pretrained.pt", save_path=model_path)
 
@@ -148,7 +151,9 @@ def train():
 
     # SWAG training
     model.train(train_loader=train_loader, valid_loader=valid_loader, lr=1e-4,
-                optimizer='sgd', num_epochs=50, num_workers=4, pretrain=False, weight_decay=0.001)
+                optimizer='sgd', num_epochs=50, num_workers=4, pretrain=False, 
+                #weight_decay=0.0275
+                )
 
     model.save(f"mesh_minimize_nside{Nside}_{Name}.pt", path=model_path)
 
